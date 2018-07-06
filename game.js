@@ -2,16 +2,12 @@
 // This is to filter noise - but someone out there will be trying.
 // NOTE: Consider Paper.js for mimic/score modeling (Path simplification)
 
-// FIXME here we are likely "suspect", pitch is fluttering in and out
-// TODO test to see if noise is still present so we can eliminate suspectCount/clearSuspect
-/*
-    currently reticle disappears and looks choppy
-    2 solutions:
-    1. whistle / sing stronger
-    (indicate via color change on reticle / strength meter) 
-
-    2. keep last position, and during suspect use last known-Y
-*/
+// TODO Encapsulate constants
+// TODO rework main update branching
+//      -- left of end
+//         -- incurve
+//      -- right of end (handle master/animation)
+//      -- in options
 
 // instead of whistling
 const INITIAL_SPEED = 2;
@@ -110,16 +106,6 @@ function multiply(M1, M2) {
 }
 
 
-var menuState = {
-    inOptions: false,
-    onCancel: false,
-    onNext: false,
-    onToggle: false,
-    oSelected: false
-}
-
-
-
 function raiseRowPower(row,i) {
     return row.map(v => Math.pow(v,i));
 }
@@ -165,16 +151,25 @@ function randomCurve(order) {
     return B;
 }
 
+var gameImages  = [{ name: 'reticle', src: 'green-reticle.png' }];
+
 class Graphics {
-    constructor(canvas) {
+
+    constructor(state, canvas) {
+	this.state = state;
 	this.canvas = canvas;
 	this.ctx = canvas.getContext('2d');
+	this.images = {};
+	gameImages.forEach( img => {
+	    this.images[img.name] = new Image();
+	    this.images[img.name].src = img.src;
+	});
 	this.baseStyle = {
 	    'strokeStyle': 'blue',
 	    'lineWidth': '7'
 	}
-	this.curve = null;
     }
+
 
     get width() {
 	return this.canvas.width;
@@ -184,17 +179,13 @@ class Graphics {
 	return this.canvas.height;
     }
 
-    // FIXME should be part of Game / Data whatever
-    // not a graphics routine
-    get startX() {
-	return this.curve.startX - 55 * DELTA_X;
+    // simplifies utility functions
+    get curve() {
+	return this.state.curve;
     }
 
-    setCurve(c, opts) {
-	opts = opts ||
-	    Object.assign({}, this.baseStyle);
-	this.curve = c;
-	this.curve.opts = opts;
+    get startX() {
+	return this.curve.startX - 55 * DELTA_X;
     }
 
     clear() {
@@ -202,8 +193,9 @@ class Graphics {
 	this.ctx.clearRect(0,0, this.width,this.height);
     }
 
+    // target could change depending on game-state
     drawTarget(pos) {
-	this.ctx.drawImage(reticle, pos.x, pos.y, 20, 20);
+	this.ctx.drawImage(this.images.reticle, pos.x, pos.y, 20, 20);
     }
 
     drawCurve(opts) {
@@ -395,22 +387,52 @@ var gameState = {
     posX: START_X,
     hasMastered: false, // Revisit this flag
     sing: false,
+    curve: null,
+    menus: {
+	inOptions: false,
+	onCancel: false,
+	onNext: false,
+	onToggle: false,
+	oSelected: false
+    },
     toggleSing: function() {
 	this.sing = !this.sing;
+    },
+    setCurve: function(gfx, c, opts) {
+	opts = opts ||
+	    Object.assign({}, gfx.baseStyle);
+	this.curve = c;
+	this.curve.opts = opts;
+    },
+    newCurve: function(gfx, order) {
+	this.setCurve(gfx, randomCurve(order))
+	this.hasMastered = true;
     }
 }
+
+function doOptionSelection(gfx, state) {
+    let s = state.menus;
+    if(state.posX >= END_OPTIONS_X) {
+	if(s.oSelected) {
+	    if(s.onToggle) state.toggleSing();
+	    else if(s.onNext) {
+		DELTA_X = Math.min(DELTA_X, 2); // TODO Delta -> state
+		state.newCurve(gfx, 7);
+	    }
+	    s.inOptions = s.onToggle = s.onNext = s.onCancel = s.oSelected = false;
+	    state.posX = gfx.startX;
+	    state.hasMastered = true; // setup for next round
+	} else state.posX = START_OPTIONS_X;
+    }
+}
+
+
 
 
 // TODO finish state consolidation
 $('document').ready(function() {
 
-    let gfx = new Graphics($('canvas')[0]);
-
-    // temporary
-    function newCurve(order) {
-	gfx.setCurve(randomCurve(order))
-	gameState.hasMastered = true;
-    }
+    let gfx = new Graphics(gameState, $('canvas')[0]);
 
     // using state mutation to determine if we have success
     // another way to do this is to use an array of points
@@ -420,54 +442,24 @@ $('document').ready(function() {
     // default success criteria, which I DO NOT LIKE
     gameState.hasMastered = true;
     var failureCount = 0; // means of lowering challenge
-    newCurve(7);
-
-    var reticle = new Image();
-    reticle.src = 'green-reticle.png';
-
+    gameState.newCurve(gfx, 7);
 
     gameUpdate = function(pitch) {
 	var whistleY = undefined;
 
 	// FIXME use a closure to set this function up
 	let state = gameState;
-	let s = menuState;
 
-	// order here matters, this can be simplified
+	// TODO limit side effects to known areas
+	if(state.menus.inOptions) doOptionSelection(gfx, state);
+	else if(state.posX > END_X) doEndOfRound(gfx, state);
 
-	if(s.inOptions) {
-	    if(state.posX >= END_OPTIONS_X) {
-		if(s.oSelected) {
-		    if(s.onToggle) state.toggleSing();
-		    else if(s.onNext) {
-			DELTA_X = Math.min(DELTA_X, 2);
-			newCurve(7);
-			// some of setup happens below (resetting state.posX, state.hasMastered)
-			// I should think about how to make a function with with these separate
-		    }
-		    s.inOptions = s.onToggle = s.onNext = s.onCancel = s.oSelected = false;
-		    state.posX = gfx.startX;
-		    state.hasMastered = true; // setup for next round
-		    mic.clearSuspect();
-		} else state.posX = START_OPTIONS_X;
-	    }
-	} else if(state.posX > END_X) {
-
+	function doEndOfRound() {
 	    console.log('speed',DELTA_X);
-
-	    // TODO this will be unreliable without logic change
-	    // need to get this number at end-of-curve
-	    /*
-	    if(suspectCount > 10) {
-		console.log('Inconsistent pitch -', suspectCount);
-		state.hasMasterd = false; // WTF - this was inactive anyway due to typo?!
-	    }
-	    */
-
 	    if(state.hasMastered) {
 		if(DELTA_X >= 3) {
 		    // TODO dynamic order
-		    newCurve(7);
+		    gameState.newCurve(gfx, 7);
 		    DELTA_X = 2;
 		} else DELTA_X = Math.min(DELTA_X*1.5, 3); 
 		failureCount = 0;
@@ -485,13 +477,13 @@ $('document').ready(function() {
 
 	    // THIS WILL NEED TO MOVE, THEY COULD CHOOSE OPTIONS
 	    state.hasMastered = true; // we start with mastered and negate with mistakes
-	    mic.clearSuspect();
-	    // suspectCount = 0;
 
 	    state.posX = gfx.startX;
 	}
 
-	$('#reticle').css('left',state.posX);
+
+	// This is just a visual aid
+	$('#metronome').css('left',state.posX);
 
 
 	// FIXME use a closure to set curve, menuState, etc
@@ -502,75 +494,54 @@ $('document').ready(function() {
 	// will take advantage of the fact that
 	// breaks during the curve indicate failure
 
-	// TODO consolidate these
-	var inCurve = gfx.curve.inboundX(state.posX),
-	    attempting = false;
 
+	
+	whistleY = Math.round(gfx.height - heightFromPitch(pitch));
+	
+	let inCurve = gfx.curve.inboundX(state.posX);
 
-	// TODO
-	// I would prefer to return early to clean code
-	// see if I can eliminate dependent logic after block
-	// this would be good practice to keep less state
-
-	if(pitch !== null) { // SHOULD BE ELIMINATED, VERIFY
-
-	    attempting = true;
-
-	    whistleY = Math.round(gfx.height - heightFromPitch(pitch));
+	if(inCurve) {
+	    let t = gfx.curve.map(state.posX),
+		y = gfx.curve.computeY(t),
+		valid = Math.abs(whistleY - y) < ACCURACY;
 	    
-	    // FIXME menuState should be passed in or closed in obvious manner
-	    // and we shouldn't be grabbing ys this way anyhow.
-	    let s = menuState,
-		ys = gfx.curve.controls.map(y);
+	    //console.log(`ws=${state.posX} y=${y} t=${t}`);
 	    
-	    if(inCurve) {
-		let t = gfx.curve.map(state.posX),
-		    y = gfx.curve.computeY(t),
-		    valid = Math.abs(whistleY - y) < ACCURACY;
-
-		//console.log(`ws=${state.posX} y=${y} t=${t}`);
-		
-		if(valid) gfx.drawCurve();
-		else state.mastered = false;
-
-		let opts = {
-		    lineWidth: '5',
-		    strokeStyle: valid ? 'yellow' : 'blue'
-		};
-		gfx.drawSegmentDelta(t, 0.02, opts);
-		
-	    } else if(state.posX > END_X-40) {
-		// selecting options
-		if(80 <= whistleY && whistleY <= 115)
-		    s.inOptions = true;
-		
-		// selecting option
-		if(!s.oSelected && state.posX >= END_OPTIONS_X-40) {
-		    if(260 <= whistleY && whistleY <= 300) 
-			s.onCancel = s.oSelected = true;
-		    else if(210 <= whistleY && whistleY <= 250) 
-			s.onNext = s.oSelected = true;
-		    else if(160 <= whistleY && whistleY <= 200)
-			s.onToggle = s.oSelected = true;
-		}
-		
+	    if(valid) gfx.drawCurve();
+	    else state.mastered = false;
+	    
+	    let opts = {
+		lineWidth: '5',
+		strokeStyle: valid ? 'yellow' : 'blue'
+	    };
+	    gfx.drawSegmentDelta(t, 0.02, opts);
+	    
+	} else if(state.posX > END_X-40) {
+	    // TODO restructure main conditionals
+	    let s = gameState.menus;
+	    // selecting options
+	    if(80 <= whistleY && whistleY <= 115)
+		s.inOptions = true;
+	    
+	    // selecting option
+	    if(!s.oSelected && state.posX >= END_OPTIONS_X-40) {
+		if(260 <= whistleY && whistleY <= 300) 
+		    s.onCancel = s.oSelected = true;
+		else if(210 <= whistleY && whistleY <= 250) 
+		    s.onNext = s.oSelected = true;
+		else if(160 <= whistleY && whistleY <= 200)
+		    s.onToggle = s.oSelected = true;
 	    }
+	    
 	}
-
-	// TODO separate dependent logic here
-	// so that we don't depend on maybe-set-this-time state
-
-	// silence does not get you a win.
-	if(inCurve && !attempting && !noise) {
-	    state.hasMastered = false;
-	}
-
-	gfx.drawOptions(menuState);
+	
+	
+	gfx.drawOptions(gameState.menus);
 	if(typeof whistleY !== 'undefined')
 	    gfx.drawTarget({ x: state.posX-10, y: whistleY-10});
 	else console.log('whistleY was undefined');
 
-	state.posX += menuState.inOptions ? Math.min(DELTA_X, 3) : DELTA_X;
+	state.posX += gameState.menus.inOptions ? Math.min(DELTA_X, 3) : DELTA_X;
     }
 
     mic.enable();

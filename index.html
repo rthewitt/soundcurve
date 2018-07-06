@@ -1,6 +1,17 @@
 <html>
     <head>
     <title>Sandbox</title>
+    <style>
+      .arrow-down {
+	width: 0px;
+	height: 0px;
+        position: absolute;
+        left: 200px;
+	border-left: 12px solid transparent;
+	border-right: 12px solid transparent;
+	border-top: 15px solid #DA70D6;
+      }
+    </style>
     <script>
       var gameUpdate = function() {
         console.log('base update called, override');
@@ -13,7 +24,7 @@
     <script src="game.js"></script>
     </head>
     <body>
-      <img id="reticle" style="position: absolute; left: 200px;" src="green-reticle.png" width="20px" height="20px" />
+      <div id="metronome" class="arrow-down"></div>
       <canvas id="sandbox-canvas" width="1640" height="400"></canvas>
     </body>
 </html>
