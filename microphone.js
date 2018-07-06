@@ -33,7 +33,6 @@ var buf = new Float32Array(1024);
 function Microphone() {
     this.tone = undefined;
     this.mediaStreamSource = null;
-    this.suspectCount = 0;
     this.pitchBuffer = [];
     this.mightStillBeNoise = 3;
 }
@@ -54,7 +53,7 @@ Microphone.prototype.enable = function() {
     if(!!navigator.mediaDevices) {
 	navigator.mediaDevices.getUserMedia(streamOpts)
 	    .then(this.onMicAudioSuccess)
-	    .catch(e => console.log('ERROR:',e));
+	    .catch(console.error);
     } else {
 	console.warn('Browser does not support getUserMedia promise, reverting to callbacks');
 	audio.getUserMedia(streamOpts, this.onMicAudioSuccess);
@@ -71,10 +70,6 @@ Microphone.prototype.smoothPitch  = function(pitch) {
 	buff[buff.length-1] = (buff[0]+buff[1]+buff[2])/3.0;
 	return buff[buff.length-1];
     } else return buff.reduce((a,b)=>a+b) / buff.length; // assume 2, but be safe
-}
-
-Microphone.prototype.clearSuspect = function() {
-    this.suspectCount = 0;
 }
 
 Microphone.prototype.onMicAudioSuccess = function(stream) {
@@ -116,7 +111,8 @@ function updatePitch() {
 
     pitch = mic.smoothPitch(pitch);
 
-    gameUpdate(pitch);
+
+    handlePitch(pitch);
 
     if (!window.requestAnimationFrame)
 	window.requestAnimationFrame = window.webkitRequestAnimationFrame;
@@ -124,5 +120,5 @@ function updatePitch() {
 
 }
 
-window.mic = new Microphone;
+window.Microphone = Microphone;
 })();

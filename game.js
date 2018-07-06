@@ -9,8 +9,6 @@
 //      -- right of end (handle master/animation)
 //      -- in options
 
-// IN STATE BRANCH
-
 // instead of whistling
 const INITIAL_SPEED = 2;
 
@@ -25,8 +23,12 @@ const ACCURACY = 20;
 
 
 
-function heightFromPitch(p) {
-    if(gameState.sing) {
+function updateY(gc, gfx, pitch) {
+    gc.posY = Math.round(gfx.height - heightFromPitch(gc.sing, pitch));
+}
+
+function heightFromPitch(doSing, p) {
+    if(doSing) {
 	// not 2 octaves, not same notes...
 	//return 700+400*(Math.log(p/440.0)/Math.log(2));
 
@@ -157,8 +159,7 @@ var gameImages  = [{ name: 'reticle', src: 'green-reticle.png' }];
 
 class Graphics {
 
-    constructor(state, canvas) {
-	this.state = state;
+    constructor(canvas) {
 	this.canvas = canvas;
 	this.ctx = canvas.getContext('2d');
 	this.images = {};
@@ -181,55 +182,48 @@ class Graphics {
 	return this.canvas.height;
     }
 
-    // simplifies utility functions
-    get curve() {
-	return this.state.curve;
-    }
-
-    get startX() {
-	return this.curve.startX - 55 * DELTA_X;
-    }
-
     clear() {
-	//this.ctx.clearRect(0,0, this.width,this.height);
 	this.ctx.clearRect(0,0, this.width,this.height);
     }
 
-    // target could change depending on game-state
+    clearOptions() {
+	this.ctx.clearRect(START_OPTIONS_X-50,0, this.width,this.height);
+    }
+
     drawTarget(pos) {
 	this.ctx.drawImage(this.images.reticle, pos.x, pos.y, 20, 20);
     }
 
-    drawCurve(opts) {
+    drawCurve(curve, opts) {
 	this.ctx.save();
-	opts = opts || this.curve.opts;
+	opts = opts || curve.opts;
 	for(var o in opts) {
 	    this.ctx[o] = opts[o];
 	}
-	this.drawMatrix();
+	this.drawMatrix(curve);
 	this.ctx.restore();
-	this.drawPoints();
+	this.drawPoints(curve);
     }
 
-    highlightCurve(opts) {
-	let _opts = this.curve.opts || {};
+    highlightCurve(curve, opts) {
+	let _opts = curve.opts || {};
 	opts = Object.assign({}, _opts, opts);
-	this.drawCurve(opts);
+	this.drawCurve(curve, opts);
 	let n = Number.parseInt(opts.lineWidth);
 	Object.assign(opts, {
 	    'lineWidth': (n-1).toString(),
 	    'strokeStyle': 'yellow'});
-	this.drawCurve(opts);
+	this.drawCurve(curve, opts);
     }
 
-    drawSegment(span, opts) {
+    drawSegment(curve, span, opts) {
 	span = span || { start: 0, end: 1 }; 
 
 	span.start = Math.max(span.start, 0);
 	span.end = Math.min(span.end, 1);
 
 	let ctx = this.ctx,
-	    _opts = this.curve.opts || {};
+	    _opts = curve.opts || {};
 	opts = Object.assign({}, _opts, opts);
 
 	ctx.save();
@@ -237,13 +231,13 @@ class Graphics {
 	    this.ctx[o] = opts[o];
 	}
 	ctx.beginPath();
-	ctx.moveTo(this.curve.computeX(span.start),
-		   this.curve.computeY(span.start));
+	ctx.moveTo(curve.computeX(span.start),
+		   curve.computeY(span.start));
 	var t;
 	for(t = span.start; t <= span.end; t += 0.01) {
 	    ctx.lineTo(
-		this.curve.computeX(t),
-		this.curve.computeY(t)
+		curve.computeX(t),
+		curve.computeY(t)
 	    );
 	}
 	ctx.stroke();
@@ -251,22 +245,22 @@ class Graphics {
     }
 
     // fat segments
-    drawSegmentDelta(t, delta, opts) {
-	this.drawSegment({
+    drawSegmentDelta(curve, t, delta, opts) {
+	this.drawSegment(curve, {
 	    start: t-delta,
 	    end: t+delta
 	}, opts);
     }
 
     // consider using De Casteljau 
-    drawMatrix() {
-	let ps = this.curve.controls,
+    drawMatrix(curve) {
+	let ps = curve.controls,
 	    px = [],
 	    py = [],
 	    ctx = this.ctx,
-	    M = this.curve.matrix;
+	    M = curve.matrix;
 
-	this.curve.controls.forEach(p => {
+	curve.controls.forEach(p => {
 	    px.push( [x(p)] );
 	    py.push( [y(p)] );
 	})
@@ -283,10 +277,10 @@ class Graphics {
 	ctx.restore();
     }
 
-    drawPoints() {
+    drawPoints(curve) {
 	let ctx = this.ctx;
 	ctx.save();
-	this.curve.points.forEach(function(e){
+	curve.points.forEach(function(e){
 	    ctx.fillStyle = 'red';
 	    ctx.beginPath();
 	    ctx.arc(x(e),y(e),3,0,2*Math.PI)
@@ -308,17 +302,20 @@ class Graphics {
 	ctx.fill();
     }
 
-    // TODO move y-calculation into drawOption
-    drawOptions(selectionState) {
-	let s = selectionState,
+    drawOptions(menuContext, active) {
+	let m = menuContext,
 	    x1 = END_X,
 	    x2 = END_OPTIONS_X;
-	this.drawOption([255,165,0, 0.2], [x1, OPTIONS_Y], s.inOptions);
-	if(s.inOptions) {
-	    this.drawOption([128,128,128], [x2, 280], s.onCancel);
-	    this.drawOption([216,191,216], [x2, 230], s.onNext);
-	    this.drawOption([255, 99, 71], [x2, 180], s.onToggle);
+	this.drawOption([255,165,0, 0.2], [x1, OPTIONS_Y], m.inOptions);
+	if(active) {
+	    this.drawOption([128,128,128], [x2, 280], m.onCancel);
+	    this.drawOption([216,191,216], [x2, 230], m.onNext);
+	    this.drawOption([255, 99, 71], [x2, 180], m.onToggle);
 	}
+    }
+
+    drawOptionsMenu(menuContext) {
+	this.drawOptions(true);
     }
 
 }
@@ -384,84 +381,193 @@ class Bezier {
 }
 
 
-var gameState = {
-    curve: null, // TODO
-    posX: START_X,
-    hasMastered: false, // Revisit this flag
-    sing: false,
-    curve: null,
-    menus: {
-	inOptions: false,
-	onCancel: false,
-	onNext: false,
-	onToggle: false,
-	oSelected: false
-    },
-    toggleSing: function() {
-	this.sing = !this.sing;
-    },
-    setCurve: function(gfx, c, opts) {
-	opts = opts ||
-	    Object.assign({}, gfx.baseStyle);
-	this.curve = c;
-	this.curve.opts = opts;
-    },
-    newCurve: function(gfx, order) {
-	this.setCurve(gfx, randomCurve(order))
-	this.hasMastered = true;
-    }
-}
 
-function doOptionSelection(gfx, state) {
-    let s = state.menus;
-    if(state.posX >= END_OPTIONS_X) {
-	if(s.oSelected) {
-	    if(s.onToggle) state.toggleSing();
-	    else if(s.onNext) {
-		DELTA_X = Math.min(DELTA_X, 2); // TODO Delta -> state
-		state.newCurve(gfx, 7);
-	    }
-	    s.inOptions = s.onToggle = s.onNext = s.onCancel = s.oSelected = false;
-	    state.posX = gfx.startX;
-	    state.hasMastered = true; // setup for next round
-	} else state.posX = START_OPTIONS_X;
+class State {
+    constructor(setup, handler, teardown) {
+	this.setup = setup;
+	this.handlePitch = handler;
+	this.teardown = teardown;
     }
 }
 
 
-
-
-// TODO finish state consolidation
 $('document').ready(function() {
 
-    let gfx = new Graphics(gameState, $('canvas')[0]);
-
-    // using state mutation to determine if we have success
-    // another way to do this is to use an array of points
-    // along the curve, each needing to be "touched"
-    // Should I remove all state as I did for Piano?
-    // Using state like this requires me to negate a
-    // default success criteria, which I DO NOT LIKE
-    gameState.hasMastered = true;
+    // broken anyway
     var failureCount = 0; // means of lowering challenge
-    gameState.newCurve(gfx, 7);
+
+    let gameContext = {
+	state: null,
+	curve: null,
+	posX: START_X,
+	posY: 0,
+	gfx: new Graphics($('canvas')[0]),
+	hasMastered: true,
+	sing: false,
+	menus: {
+	    inOptions: false,
+	    onCancel: false,
+	    onNext: false,
+	    onToggle: false,
+	    oSelected: false
+	},
+	transition(s) {
+	    if(this.state && this.state.teardown) {
+		this.state.teardown(this);
+	    }
+	    if(s.setup) s.setup(this);
+	    this.state = s;
+	},
+	setCurve: function(c, opts) {
+	    opts = opts ||
+		Object.assign({}, this.gfx.baseStyle);
+	    this.curve = c;
+	    this.curve.opts = opts;
+	},
+	handlePitch: function(pitch) {
+	    this.state.handlePitch(this, pitch);
+	},
+	toggleSing: function() {
+	    this.sing = !this.sing;
+	},
+    }
+
+    let sillyState = {
+
+	handlePitch: function(gameContext, pitch) {
+	    console.log("YOU'RE SO SILLY!");
+	}
+    }
+
+    let beforeState = {
+
+	setup: function(gameContext, pitch) {
+	    let gc = gameContext;
+	    if(!gc.curve) gc.setCurve(randomCurve(7)); // TODO difficulty
+	    gc.posX = gc.curve.startX - 55 * DELTA_X;
+	},
+
+	handlePitch: function(gameContext, pitch) {
+	    let gc = gameContext,
+	        gfx = gc.gfx;
+
+	    // This is just a visual aid
+	    $('#metronome').css('left',gc.posX);
+
+	    gfx.clear();
+	    gfx.highlightCurve(gc.curve);
+
+	    updateY(gc,gfx,pitch);
+	    gfx.drawOptions(gc.menus);
+	    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+	    gc.posX += DELTA_X;
+	    if(gc.curve.inboundX(gc.posX)) gc.transition(tryState);
+	}
+
+    }
+
+
+    let tryState = {
+
+	handlePitch: function(gameContext, pitch) {
+
+	    let gc = gameContext,
+	        gfx = gc.gfx;
+
+	    // This is just a visual aid
+	    $('#metronome').css('left',gc.posX);
+
+	    gfx.clear();
+
+	    updateY(gc,gfx,pitch);
+	    gfx.drawOptions(gc.menus);
+	    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+	    let t = gc.curve.map(gc.posX),
+		y = gc.curve.computeY(t),
+		valid = Math.abs(gc.posY - y) < ACCURACY;
+	    
+	    if(valid) gfx.drawCurve(gc.curve);
+	    else gfx.highlightCurve(gc.curve);
+
+	    // remove
+	    // gc.mastered = false;
+	    
+	    let opts = {
+		lineWidth: '5',
+		strokeStyle: valid ? 'yellow' : 'blue'
+	    };
+	    gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
+
+	    gc.posX += DELTA_X;
+
+	    if(gc.posX > END_X-40) {
+		let state = 80 <= gc.posY && gc.posY <= 115 ?
+		    optionState : beforeState;
+		gc.transition(state);
+	    }
+	}
+
+    }
+
+    optionState = {
+	handlePitch: function(gameContext, pitch) {
+	    let gc = gameContext,
+		gfx = gc.gfx,
+		m = gc.menus;
+
+	    gfx.clearOptions();
+	    updateY(gc,gfx,pitch);
+	    gfx.drawOptionsMenu(gc.menus);
+	    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+	    /*
+		if(m.oSelected) {
+		    if(m.onToggle) context.toggleSing();
+		    else if(m.onNext) {
+			DELTA_X = Math.min(DELTA_X, 2); // TODO Delta -> gameContext?
+			context.newCurve(gfx, 7);
+		    }
+		    m.inOptions = m.onToggle = m.onNext = m.onCancel = m.oSelected = false;
+		    context.posX = gfx.startX;
+		    context.hasMastered = true; // setup for next round
+		} else context.posX = START_OPTIONS_X;
+		*/
+
+	    gc.posX += DELTA_X;
+
+	    if(gc.posX >= END_OPTIONS_X) {
+		gc.transition(beforeState);
+	    } 
+	}
+    }
+
+    gameContext.transition(beforeState);
+
+    handlePitch = p => gameContext.handlePitch(p);
+
+    let mic = window.mic = new Microphone;
+    mic.enable();
+
+    return;
 
     gameUpdate = function(pitch) {
 	var whistleY = undefined;
 
 	// FIXME use a closure to set this function up
-	let state = gameState;
+	let gc = gameContext;
 
 	// TODO limit side effects to known areas
-	if(state.menus.inOptions) doOptionSelection(gfx, state);
-	else if(state.posX > END_X) doEndOfRound(gfx, state);
+	if(gc.menus.inOptions) doOptionSelection(gfx, gc);
+	else if(gc.posX > END_X) doEndOfRound(gfx, gc);
 
 	function doEndOfRound() {
 	    console.log('speed',DELTA_X);
-	    if(state.hasMastered) {
+	    if(gc.hasMastered) {
 		if(DELTA_X >= 3) {
 		    // TODO dynamic order
-		    gameState.newCurve(gfx, 7);
+		    gameContext.newCurve(gfx, 7);
 		    DELTA_X = 2;
 		} else DELTA_X = Math.min(DELTA_X*1.5, 3); 
 		failureCount = 0;
@@ -478,17 +584,17 @@ $('document').ready(function() {
 	    }
 
 	    // THIS WILL NEED TO MOVE, THEY COULD CHOOSE OPTIONS
-	    state.hasMastered = true; // we start with mastered and negate with mistakes
+	    gc.hasMastered = true; // we start with mastered and negate with mistakes
 
-	    state.posX = gfx.startX;
+	    gc.posX = gfx.startX;
 	}
 
 
 	// This is just a visual aid
-	$('#metronome').css('left',state.posX);
+	$('#metronome').css('left',gc.posX);
 
 
-	// FIXME use a closure to set curve, menuState, etc
+	// FIXME use a closure to set curve, menuContext, etc
 	// TODO put graphics stuff into Graphics->drawCurve
 	gfx.clear();
 	gfx.highlightCurve();
@@ -500,51 +606,46 @@ $('document').ready(function() {
 	
 	whistleY = Math.round(gfx.height - heightFromPitch(pitch));
 	
-	let inCurve = gfx.curve.inboundX(state.posX);
+	let inCurve = gfx.curve.inboundX(gc.posX);
 
 	if(inCurve) {
-	    let t = gfx.curve.map(state.posX),
+	    let t = gfx.curve.map(gc.posX),
 		y = gfx.curve.computeY(t),
 		valid = Math.abs(whistleY - y) < ACCURACY;
 	    
-	    //console.log(`ws=${state.posX} y=${y} t=${t}`);
+	    //console.log(`ws=${gc.posX} y=${y} t=${t}`);
 	    
 	    if(valid) gfx.drawCurve();
-	    else state.mastered = false;
+	    else gc.mastered = false;
 	    
 	    let opts = {
 		lineWidth: '5',
 		strokeStyle: valid ? 'yellow' : 'blue'
 	    };
-	    gfx.drawSegmentDelta(t, 0.02, opts);
+	    gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
 	    
-	} else if(state.posX > END_X-40) {
+	} else if(gc.posX > END_X-40) {
 	    // TODO restructure main conditionals
-	    let s = gameState.menus;
+	    let m = gameContext.menus;
 	    // selecting options
 	    if(80 <= whistleY && whistleY <= 115)
-		s.inOptions = true;
+		m.inOptions = true;
 	    
 	    // selecting option
-	    if(!s.oSelected && state.posX >= END_OPTIONS_X-40) {
+	    if(!m.oSelected && gc.posX >= END_OPTIONS_X-40) {
 		if(260 <= whistleY && whistleY <= 300) 
-		    s.onCancel = s.oSelected = true;
+		    m.onCancel = m.oSelected = true;
 		else if(210 <= whistleY && whistleY <= 250) 
-		    s.onNext = s.oSelected = true;
+		    m.onNext = m.oSelected = true;
 		else if(160 <= whistleY && whistleY <= 200)
-		    s.onToggle = s.oSelected = true;
+		    m.onToggle = m.oSelected = true;
 	    }
 	    
 	}
 	
-	
-	gfx.drawOptions(gameState.menus);
-	if(typeof whistleY !== 'undefined')
-	    gfx.drawTarget({ x: state.posX-10, y: whistleY-10});
-	else console.log('whistleY was undefined');
+	gfx.drawOptions(gameContext.menus);
+	gfx.drawTarget({ x: gc.posX-10, y: whistleY-10});
 
-	state.posX += gameState.menus.inOptions ? Math.min(DELTA_X, 3) : DELTA_X;
+	gc.posX += gameContext.menus.inOptions ? Math.min(DELTA_X, 3) : DELTA_X;
     }
-
-    mic.enable();
 });
