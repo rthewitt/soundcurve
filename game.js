@@ -9,6 +9,8 @@
 //      -- right of end (handle master/animation)
 //      -- in options
 
+// IN STATE BRANCH
+
 // instead of whistling
 const INITIAL_SPEED = 2;
 
