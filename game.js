@@ -16,7 +16,7 @@ var DELTA_X = INITIAL_SPEED;
 // will correct octave for singing
 const START_X = 250;
 const END_X = 750;
-const START_OPTIONS_X = END_X+1;
+const START_OPTIONS_X = END_X-40;
 const END_OPTIONS_X = 950;
 const OPTIONS_Y = 100;
 const ACCURACY = 20;
@@ -162,6 +162,7 @@ class Graphics {
     constructor(canvas) {
 	this.canvas = canvas;
 	this.ctx = canvas.getContext('2d');
+	this.metronome = $('#metronome');
 	this.images = {};
 	gameImages.forEach( img => {
 	    this.images[img.name] = new Image();
@@ -187,7 +188,12 @@ class Graphics {
     }
 
     clearOptions() {
-	this.ctx.clearRect(START_OPTIONS_X-50,0, this.width,this.height);
+	this.ctx.clearRect(START_OPTIONS_X-10,0, // room for cursor
+			   this.width,this.height);
+    }
+
+    slideMetronome(x) {
+	this.metronome.css('left', x);
     }
 
     drawTarget(pos) {
@@ -196,13 +202,15 @@ class Graphics {
 
     drawCurve(curve, opts) {
 	this.ctx.save();
-	opts = opts || curve.opts;
+	let _opts = curve.opts || {};
+	opts = Object.assign({}, _opts, opts);
+	//opts = opts || curve.opts;
 	for(var o in opts) {
 	    this.ctx[o] = opts[o];
 	}
 	this.drawMatrix(curve);
 	this.ctx.restore();
-	this.drawPoints(curve);
+	//this.drawPoints(curve);
     }
 
     highlightCurve(curve, opts) {
@@ -302,12 +310,12 @@ class Graphics {
 	ctx.fill();
     }
 
-    drawOptions(menuContext, active) {
-	let m = menuContext,
-	    x1 = END_X,
+    drawOptions(menu) {
+	let x1 = END_X,
 	    x2 = END_OPTIONS_X;
-	this.drawOption([255,165,0, 0.2], [x1, OPTIONS_Y], m.inOptions);
-	if(active) {
+	this.drawOption([255,165,0, 0.2], [x1, OPTIONS_Y], !!menu);
+	if(menu) {
+	    let m = menu;
 	    this.drawOption([128,128,128], [x2, 280], m.onCancel);
 	    this.drawOption([216,191,216], [x2, 230], m.onNext);
 	    this.drawOption([255, 99, 71], [x2, 180], m.onToggle);
@@ -315,7 +323,7 @@ class Graphics {
     }
 
     drawOptionsMenu(menuContext) {
-	this.drawOptions(true);
+	this.drawOptions(menuContext);
     }
 
 }
@@ -381,36 +389,216 @@ class Bezier {
 }
 
 
+let sillyState = {
 
-class State {
-    constructor(setup, handler, teardown) {
-	this.setup = setup;
-	this.handlePitch = handler;
-	this.teardown = teardown;
+    handlePitch: function(gameContext, pitch) {
+	console.log("YOU'RE SO SILLY!");
+    }
+}
+
+let beforeState = {
+
+    setup: function(gameContext, pitch) {
+	let gc = gameContext;
+	if(!gc.curve) gc.setCurve(randomCurve(7)); // TODO difficulty
+	gc.posX = gc.curve.startX - 55 * DELTA_X;
+    },
+
+    handlePitch: function(gameContext, pitch) {
+	let gc = gameContext,
+	    gfx = gc.gfx;
+
+	gfx.clear();
+	gfx.slideMetronome(gc.posX);
+	gfx.highlightCurve(gc.curve);
+
+	updateY(gc,gfx,pitch);
+	gfx.drawOptions();
+	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+	gc.posX += DELTA_X;
+	if(gc.curve.inboundX(gc.posX)) gc.transition(tryState);
+    }
+
+}
+
+function handleAttempt(gc, gfx) {
+    gfx.clear();
+    gfx.slideMetronome(gc.posX);
+    gfx.drawOptions();
+    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+    let t = gc.curve.map(gc.posX),
+	y = gc.curve.computeY(t),
+	valid = Math.abs(gc.posY - y) < ACCURACY;
+
+    if(valid) gfx.drawCurve(gc.curve);
+    else gfx.highlightCurve(gc.curve);
+
+    let opts = {
+	lineWidth: '5',
+	strokeStyle: valid ? 'yellow' : 'blue'
+    };
+    gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
+
+    gc.posX += DELTA_X;
+    return valid;
+}
+
+let tryState = {
+
+    handlePitch: function(gameContext, pitch) {
+
+	let gc = gameContext,
+	    gfx = gc.gfx;
+
+	updateY(gc,gfx,pitch);
+
+	let success = handleAttempt(gc, gfx);
+
+	if(!success) gc.transition(failState);
+	else if(gc.posX > gc.curve.endX) {
+	    gc.transition(successState);
+	}
+    }
+}
+
+let failState = {
+
+    setup: function(gameContext, pitch) {
+	console.log('FAILED');
+	gameContext.failCount++;
+    },
+
+    handlePitch: function(gameContext, pitch) {
+
+	let gc = gameContext,
+	    gfx = gc.gfx;
+
+	updateY(gc,gfx,pitch);
+
+	let success = handleAttempt(gc, gfx);
+
+	if(gc.posX > START_OPTIONS_X &&
+	   80 <= gc.posY && gc.posY <= 115) {
+	    gc.transition(optionState);
+	} else if(gc.posX > END_X)
+	    gc.transition(beforeState);
+    },
+
+    teardown(gameContext, pitch) {
+	let gc = gameContext;
+	if(gc.failCount >= 3) {
+	    gc.failCount = 0;
+	    DELTA_X = Math.max(1, DELTA_X-1);
+	    // TODO implement difficulty level in terms of points
+	    // This will give a sense of progression / regression
+	    console.log('BOOTED!!');
+	    console.log('new speed',DELTA_X);
+	}
+    }
+
+}
+
+let successState = {
+
+    setup: function(gameContext, pitch) {
+	console.log('SUCCESS!!');
+    },
+
+    handlePitch: function(gameContext, pitch) {
+	let gc = gameContext,
+	    gfx = gc.gfx;
+
+	gfx.clear();
+	gfx.slideMetronome(gc.posX);
+	gfx.drawCurve(gc.curve, { strokeStyle: 'green' });
+
+	updateY(gc,gfx,pitch);
+	gfx.drawOptions();
+	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+	gc.posX += DELTA_X;
+	if(gc.posX > START_OPTIONS_X &&
+	   80 <= gc.posY && gc.posY <= 115) {
+	    gc.transition(optionState);
+	} else if(gc.posX > END_X)
+	    gc.transition(beforeState);
+    },
+
+    teardown(gameContext, pitch) {
+	if(DELTA_X >= 3) {
+	    gameContext.setCurve(randomCurve(7)); // TODO change difficulty?
+	    DELTA_X = 2;
+	} else DELTA_X = Math.min(DELTA_X*1.5, 3); 
+	gameContext.failCount = 0;
+    }
+}
+
+
+let optionState = {
+    setup: function(gameContext, pitch) {
+	console.log('SETUP OPTIONS');
+	this.options = {
+	    onCancel: false,
+	    onNext: false,
+	    onToggle: false,
+	};
+	gameContext.posX = gameContext.posX || START_OPTIONS_X;
+    },
+    handlePitch: function(gameContext, pitch) {
+	let gc = gameContext,
+	    gfx = gc.gfx,
+	    m = this.options;
+
+	gfx.clearOptions();
+	gfx.slideMetronome(gc.posX);
+	updateY(gc,gfx,pitch);
+	gfx.drawOptionsMenu(this.options);
+	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+
+	let oSelected = Object.values(this.options).some(v=>v);
+
+	// only select an option if we haven't yet
+	if(!oSelected && gc.posX >= END_OPTIONS_X-40) {
+	    if(260 <= gc.posY && gc.posY <= 300) 
+		m.onCancel = oSelected = true;
+	    else if(210 <= gc.posY && gc.posY <= 250) 
+		m.onNext = oSelected = true;
+	    else if(160 <= gc.posY && gc.posY <= 200)
+		m.onToggle = oSelected = true;
+	}
+
+	gc.posX += DELTA_X;
+
+	if(gc.posX >= END_OPTIONS_X) {
+	    gc.transition(oSelected ? beforeState: optionState);
+	}
+    },
+
+    teardown: function(gameContext, pitch) {
+	console.log('TEARDOWN');
+	let m = this.options;
+	if(m.onToggle) gameContext.toggleSing();
+	else if(m.onNext) {
+	    gameContext.curve = null;
+	    DELTA_X = Math.min(DELTA_X, 2); // TODO Delta -> gameContext?
+	}
+	gameContext.posX = 0;
     }
 }
 
 
 $('document').ready(function() {
 
-    // broken anyway
-    var failureCount = 0; // means of lowering challenge
-
     let gameContext = {
 	state: null,
 	curve: null,
+	failCount: 0,
 	posX: START_X,
 	posY: 0,
 	gfx: new Graphics($('canvas')[0]),
-	hasMastered: true,
 	sing: false,
-	menus: {
-	    inOptions: false,
-	    onCancel: false,
-	    onNext: false,
-	    onToggle: false,
-	    oSelected: false
-	},
 	transition(s) {
 	    if(this.state && this.state.teardown) {
 		this.state.teardown(this);
@@ -432,116 +620,6 @@ $('document').ready(function() {
 	},
     }
 
-    let sillyState = {
-
-	handlePitch: function(gameContext, pitch) {
-	    console.log("YOU'RE SO SILLY!");
-	}
-    }
-
-    let beforeState = {
-
-	setup: function(gameContext, pitch) {
-	    let gc = gameContext;
-	    if(!gc.curve) gc.setCurve(randomCurve(7)); // TODO difficulty
-	    gc.posX = gc.curve.startX - 55 * DELTA_X;
-	},
-
-	handlePitch: function(gameContext, pitch) {
-	    let gc = gameContext,
-	        gfx = gc.gfx;
-
-	    // This is just a visual aid
-	    $('#metronome').css('left',gc.posX);
-
-	    gfx.clear();
-	    gfx.highlightCurve(gc.curve);
-
-	    updateY(gc,gfx,pitch);
-	    gfx.drawOptions(gc.menus);
-	    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
-
-	    gc.posX += DELTA_X;
-	    if(gc.curve.inboundX(gc.posX)) gc.transition(tryState);
-	}
-
-    }
-
-
-    let tryState = {
-
-	handlePitch: function(gameContext, pitch) {
-
-	    let gc = gameContext,
-	        gfx = gc.gfx;
-
-	    // This is just a visual aid
-	    $('#metronome').css('left',gc.posX);
-
-	    gfx.clear();
-
-	    updateY(gc,gfx,pitch);
-	    gfx.drawOptions(gc.menus);
-	    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
-
-	    let t = gc.curve.map(gc.posX),
-		y = gc.curve.computeY(t),
-		valid = Math.abs(gc.posY - y) < ACCURACY;
-	    
-	    if(valid) gfx.drawCurve(gc.curve);
-	    else gfx.highlightCurve(gc.curve);
-
-	    // remove
-	    // gc.mastered = false;
-	    
-	    let opts = {
-		lineWidth: '5',
-		strokeStyle: valid ? 'yellow' : 'blue'
-	    };
-	    gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
-
-	    gc.posX += DELTA_X;
-
-	    if(gc.posX > END_X-40) {
-		let state = 80 <= gc.posY && gc.posY <= 115 ?
-		    optionState : beforeState;
-		gc.transition(state);
-	    }
-	}
-
-    }
-
-    optionState = {
-	handlePitch: function(gameContext, pitch) {
-	    let gc = gameContext,
-		gfx = gc.gfx,
-		m = gc.menus;
-
-	    gfx.clearOptions();
-	    updateY(gc,gfx,pitch);
-	    gfx.drawOptionsMenu(gc.menus);
-	    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
-
-	    /*
-		if(m.oSelected) {
-		    if(m.onToggle) context.toggleSing();
-		    else if(m.onNext) {
-			DELTA_X = Math.min(DELTA_X, 2); // TODO Delta -> gameContext?
-			context.newCurve(gfx, 7);
-		    }
-		    m.inOptions = m.onToggle = m.onNext = m.onCancel = m.oSelected = false;
-		    context.posX = gfx.startX;
-		    context.hasMastered = true; // setup for next round
-		} else context.posX = START_OPTIONS_X;
-		*/
-
-	    gc.posX += DELTA_X;
-
-	    if(gc.posX >= END_OPTIONS_X) {
-		gc.transition(beforeState);
-	    } 
-	}
-    }
 
     gameContext.transition(beforeState);
 
@@ -549,103 +627,4 @@ $('document').ready(function() {
 
     let mic = window.mic = new Microphone;
     mic.enable();
-
-    return;
-
-    gameUpdate = function(pitch) {
-	var whistleY = undefined;
-
-	// FIXME use a closure to set this function up
-	let gc = gameContext;
-
-	// TODO limit side effects to known areas
-	if(gc.menus.inOptions) doOptionSelection(gfx, gc);
-	else if(gc.posX > END_X) doEndOfRound(gfx, gc);
-
-	function doEndOfRound() {
-	    console.log('speed',DELTA_X);
-	    if(gc.hasMastered) {
-		if(DELTA_X >= 3) {
-		    // TODO dynamic order
-		    gameContext.newCurve(gfx, 7);
-		    DELTA_X = 2;
-		} else DELTA_X = Math.min(DELTA_X*1.5, 3); 
-		failureCount = 0;
-		console.log('MASTERED!');
-	    } else {
-		if(failureCount > 4) {
-		    failureCount = 0;
-		    DELTA_X = Math.max(1, DELTA_X-1);
-		    // TODO implement difficulty level in terms of points
-		    // This will give a sense of progression / regression
-		    console.log('BOOTED!!');
-		    console.log('new speed',DELTA_X);
-		} else failureCount++;
-	    }
-
-	    // THIS WILL NEED TO MOVE, THEY COULD CHOOSE OPTIONS
-	    gc.hasMastered = true; // we start with mastered and negate with mistakes
-
-	    gc.posX = gfx.startX;
-	}
-
-
-	// This is just a visual aid
-	$('#metronome').css('left',gc.posX);
-
-
-	// FIXME use a closure to set curve, menuContext, etc
-	// TODO put graphics stuff into Graphics->drawCurve
-	gfx.clear();
-	gfx.highlightCurve();
-
-	// will take advantage of the fact that
-	// breaks during the curve indicate failure
-
-
-	
-	whistleY = Math.round(gfx.height - heightFromPitch(pitch));
-	
-	let inCurve = gfx.curve.inboundX(gc.posX);
-
-	if(inCurve) {
-	    let t = gfx.curve.map(gc.posX),
-		y = gfx.curve.computeY(t),
-		valid = Math.abs(whistleY - y) < ACCURACY;
-	    
-	    //console.log(`ws=${gc.posX} y=${y} t=${t}`);
-	    
-	    if(valid) gfx.drawCurve();
-	    else gc.mastered = false;
-	    
-	    let opts = {
-		lineWidth: '5',
-		strokeStyle: valid ? 'yellow' : 'blue'
-	    };
-	    gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
-	    
-	} else if(gc.posX > END_X-40) {
-	    // TODO restructure main conditionals
-	    let m = gameContext.menus;
-	    // selecting options
-	    if(80 <= whistleY && whistleY <= 115)
-		m.inOptions = true;
-	    
-	    // selecting option
-	    if(!m.oSelected && gc.posX >= END_OPTIONS_X-40) {
-		if(260 <= whistleY && whistleY <= 300) 
-		    m.onCancel = m.oSelected = true;
-		else if(210 <= whistleY && whistleY <= 250) 
-		    m.onNext = m.oSelected = true;
-		else if(160 <= whistleY && whistleY <= 200)
-		    m.onToggle = m.oSelected = true;
-	    }
-	    
-	}
-	
-	gfx.drawOptions(gameContext.menus);
-	gfx.drawTarget({ x: gc.posX-10, y: whistleY-10});
-
-	gc.posX += gameContext.menus.inOptions ? Math.min(DELTA_X, 3) : DELTA_X;
-    }
 });
