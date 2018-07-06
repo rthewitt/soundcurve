@@ -1,0 +1,19 @@
+<html>
+    <head>
+    <title>Sandbox</title>
+    <script>
+      var gameUpdate = function() {
+        console.log('base update called, override');
+      }
+    </script>
+    <script src="jquery.js"></script>
+    <script src="audio.js"></script>
+    <script src="microphone.js"></script>
+    <script src="matrix-invert.js"></script>
+    <script src="game.js"></script>
+    </head>
+    <body>
+      <img id="reticle" style="position: absolute; left: 200px;" src="green-reticle.png" width="20px" height="20px" />
+      <canvas id="sandbox-canvas" width="1640" height="400"></canvas>
+    </body>
+</html>
