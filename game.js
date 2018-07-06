@@ -11,9 +11,6 @@
 
 // instead of whistling
 const INITIAL_SPEED = 2;
-
-var DELTA_X = INITIAL_SPEED;
-// will correct octave for singing
 const START_X = 250;
 const END_X = 750;
 const START_OPTIONS_X = END_X-40;
@@ -401,7 +398,7 @@ let beforeState = {
     setup: function(gameContext, pitch) {
 	let gc = gameContext;
 	if(!gc.curve) gc.setCurve(randomCurve(7)); // TODO difficulty
-	gc.posX = gc.curve.startX - 55 * DELTA_X;
+	gc.posX = gc.curve.startX - 55 * gc.speed;
     },
 
     handlePitch: function(gameContext, pitch) {
@@ -416,7 +413,7 @@ let beforeState = {
 	gfx.drawOptions();
 	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
 
-	gc.posX += DELTA_X;
+	gc.posX += gc.speed;
 	if(gc.curve.inboundX(gc.posX)) gc.transition(tryState);
     }
 
@@ -441,7 +438,7 @@ function handleAttempt(gc, gfx) {
     };
     gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
 
-    gc.posX += DELTA_X;
+    gc.posX += gc.speed;
     return valid;
 }
 
@@ -490,11 +487,11 @@ let failState = {
 	let gc = gameContext;
 	if(gc.failCount >= 3) {
 	    gc.failCount = 0;
-	    DELTA_X = Math.max(1, DELTA_X-1);
+	    gc.speed = Math.max(1, gc.speed-1);
 	    // TODO implement difficulty level in terms of points
 	    // This will give a sense of progression / regression
 	    console.log('BOOTED!!');
-	    console.log('new speed',DELTA_X);
+	    console.log('new speed',gc.speed);
 	}
     }
 
@@ -518,7 +515,7 @@ let successState = {
 	gfx.drawOptions();
 	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
 
-	gc.posX += DELTA_X;
+	gc.posX += gc.speed;
 	if(gc.posX > START_OPTIONS_X &&
 	   80 <= gc.posY && gc.posY <= 115) {
 	    gc.transition(optionState);
@@ -527,10 +524,10 @@ let successState = {
     },
 
     teardown(gameContext, pitch) {
-	if(DELTA_X >= 3) {
+	if(gc.speed >= 3) {
 	    gameContext.setCurve(randomCurve(7)); // TODO change difficulty?
-	    DELTA_X = 2;
-	} else DELTA_X = Math.min(DELTA_X*1.5, 3); 
+	    gc.speed = 2;
+	} else gc.speed = Math.min(gc.speed*1.5, 3); 
 	gameContext.failCount = 0;
     }
 }
@@ -569,7 +566,7 @@ let optionState = {
 		m.onToggle = oSelected = true;
 	}
 
-	gc.posX += DELTA_X;
+	gc.posX += gc.speed;
 
 	if(gc.posX >= END_OPTIONS_X) {
 	    gc.transition(oSelected ? beforeState: optionState);
@@ -577,14 +574,15 @@ let optionState = {
     },
 
     teardown: function(gameContext, pitch) {
-	console.log('TEARDOWN');
-	let m = this.options;
-	if(m.onToggle) gameContext.toggleSing();
+	let m = this.options,
+	    gc = gameContext;
+	if(m.onToggle) gc.toggleSing();
 	else if(m.onNext) {
-	    gameContext.curve = null;
-	    DELTA_X = Math.min(DELTA_X, 2); // TODO Delta -> gameContext?
+	    gc.curve = null;
+	    gc.speed = Math.min(gc.speed, 2);
 	}
-	gameContext.posX = 0;
+	if(!m.onCancel) gc.failCount = 0;
+	gc.posX = 0;
     }
 }
 
@@ -594,6 +592,7 @@ $('document').ready(function() {
     let gameContext = {
 	state: null,
 	curve: null,
+	speed: INITIAL_SPEED,
 	failCount: 0,
 	posX: START_X,
 	posY: 0,
