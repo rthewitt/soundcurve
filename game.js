@@ -3,11 +3,6 @@
 // NOTE: Consider Paper.js for mimic/score modeling (Path simplification)
 
 // TODO Encapsulate constants
-// TODO rework main update branching
-//      -- left of end
-//         -- incurve
-//      -- right of end (handle master/animation)
-//      -- in options
 
 // instead of whistling
 const INITIAL_SPEED = 2;
@@ -20,8 +15,8 @@ const ACCURACY = 20;
 
 
 
-function updateY(gc, gfx, pitch) {
-    gc.posY = Math.round(gfx.height - heightFromPitch(gc.sing, pitch));
+function pitchToPos(gc, pitch) {
+    return Math.round(gc.gfx.height - heightFromPitch(gc.sing, pitch));
 }
 
 function heightFromPitch(doSing, p) {
@@ -211,9 +206,15 @@ class Graphics {
     }
 
     highlightCurve(curve, opts) {
+	/*
 	let _opts = curve.opts || {};
 	opts = Object.assign({}, _opts, opts);
 	this.drawCurve(curve, opts);
+	let _opts = curve.opts || {};
+	opts = Object.assign({}, _opts, opts);
+	*/
+	let _opts = curve.opts || {};
+	opts = Object.assign({}, _opts, opts);
 	let n = Number.parseInt(opts.lineWidth);
 	Object.assign(opts, {
 	    'lineWidth': (n-1).toString(),
@@ -386,85 +387,85 @@ class Bezier {
 }
 
 
-let sillyState = {
-
-    handlePitch: function(gameContext, pitch) {
-	console.log("YOU'RE SO SILLY!");
-    }
-}
-
-let beforeState = {
-
+let startState  = {
+    
     setup: function(gameContext, pitch) {
 	let gc = gameContext;
-	if(!gc.curve) gc.setCurve(randomCurve(7)); // TODO difficulty
+
+	// need a curve, perdiod!
+	if(!gc.curve)
+	    gc.setCurve(randomCurve(7)); // TODO difficulty
+
+
+	// we want consecutive successes
+	if(!!gc.failCount) {
+	    gc.successCount = 0;
+	    // need something a little easier
+	    if(gc.failCount >= 3) {
+		gc.speed = Math.min(Math.max(gc.speed-1, 1), 2);
+		gc.failCount = 0;
+		console.log('BOOTED, speed=',gc.speed);
+	    }
+	}
+
+	// need another challenge!
+	if(!!gc.successCount && gc.speed >= 3) {
+	    console.log('MASTERED!');
+	    gc.speed = INITIAL_SPEED;
+	    gc.setCurve(randomCurve(7));
+	    gc.successCount = 0;
+	    gc.failCount = 0;
+	}
+
+	// just need to speed things up a little
+	if(!!gc.successCount) {
+	    console.log("Congrats!  Let's go faster...");
+	    gc.speed = Math.min(gc.speed*1.5, 3); 
+	}
+
+	// start position (depends on speed)
 	gc.posX = gc.curve.startX - 55 * gc.speed;
     },
 
     handlePitch: function(gameContext, pitch) {
-	let gc = gameContext,
-	    gfx = gc.gfx;
-
-	gfx.clear();
-	gfx.slideMetronome(gc.posX);
-	gfx.highlightCurve(gc.curve);
-
-	updateY(gc,gfx,pitch);
-	gfx.drawOptions();
-	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
-
-	gc.posX += gc.speed;
-	if(gc.curve.inboundX(gc.posX)) gc.transition(tryState);
+	gameContext.transition(simpleState);
     }
 
 }
 
-function handleAttempt(gc, gfx) {
-    gfx.clear();
-    gfx.slideMetronome(gc.posX);
-    gfx.drawOptions();
-    gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+let simpleState = {
+    
+    setup: function(gc) {
+	gc.render.highlite = true;
+    },
 
-    let t = gc.curve.map(gc.posX),
-	y = gc.curve.computeY(t),
-	valid = Math.abs(gc.posY - y) < ACCURACY;
+    handlePitch: function(gameContext, pitch) {
+	let gc = gameContext,
+	    state;
 
-    if(valid) gfx.drawCurve(gc.curve);
-    else gfx.highlightCurve(gc.curve);
+	if(gc.curve.inboundX(gc.posX))
+	    state = tryState;
 
-    let opts = {
-	lineWidth: '5',
-	strokeStyle: valid ? 'yellow' : 'blue'
-    };
-    gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
+	else if(gc.posX > START_OPTIONS_X &&
+	   80 <= gc.posY && gc.posY <= 115) 
+	    state = optionState;
 
-    gc.posX += gc.speed;
-    return valid;
+	else if(gc.posX > END_X)
+	    state = startState;
+
+	if(state) gameContext.transition(state);
+    },
+    
+    teardown: function(gc) {
+	gc.render.highlite = false;
+    }
 }
+
 
 let tryState = {
 
-    handlePitch: function(gameContext, pitch) {
-
-	let gc = gameContext,
-	    gfx = gc.gfx;
-
-	updateY(gc,gfx,pitch);
-
-	let success = handleAttempt(gc, gfx);
-
-	if(!success) gc.transition(failState);
-	else if(gc.posX > gc.curve.endX) {
-	    gc.transition(successState);
-	}
-    }
-}
-
-let failState = {
-
-    setup: function(gameContext, pitch) {
-	console.log('FAILED');
-	gameContext.failCount++;
+    setup: function() {
+	this.failed = false;
     },
 
     handlePitch: function(gameContext, pitch) {
@@ -472,30 +473,31 @@ let failState = {
 	let gc = gameContext,
 	    gfx = gc.gfx;
 
-	updateY(gc,gfx,pitch);
+	let t = gc.curve.map(gc.posX),
+	    y = gc.curve.computeY(t),
+	    valid = Math.abs(gc.posY - y) < ACCURACY;
 
-	let success = handleAttempt(gc, gfx);
+	if(valid) gfx.drawCurve(gc.curve);
+	else gfx.highlightCurve(gc.curve);
 
-	if(gc.posX > START_OPTIONS_X &&
-	   80 <= gc.posY && gc.posY <= 115) {
-	    gc.transition(optionState);
-	} else if(gc.posX > END_X)
-	    gc.transition(beforeState);
+	let opts = {
+	    lineWidth: '5',
+	    strokeStyle: valid ? 'yellow' : 'blue'
+	};
+	gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
+
+	if(!valid) this.failed = true;
+
+	if(gc.posX >= gc.curve.endX) 
+	    gc.transition(this.failed ?
+			  simpleState : successState);
     },
 
-    teardown(gameContext, pitch) {
-	let gc = gameContext;
-	if(gc.failCount >= 3) {
-	    gc.failCount = 0;
-	    gc.speed = Math.max(1, gc.speed-1);
-	    // TODO implement difficulty level in terms of points
-	    // This will give a sense of progression / regression
-	    console.log('BOOTED!!');
-	    console.log('new speed',gc.speed);
-	}
+    teardown: function(gameContext, pitch) {
+	if(this.failed) gameContext.failCount++;
     }
-
 }
+
 
 let successState = {
 
@@ -504,55 +506,41 @@ let successState = {
     },
 
     handlePitch: function(gameContext, pitch) {
-	let gc = gameContext,
-	    gfx = gc.gfx;
-
-	gfx.clear();
-	gfx.slideMetronome(gc.posX);
-	gfx.drawCurve(gc.curve, { strokeStyle: 'green' });
-
-	updateY(gc,gfx,pitch);
-	gfx.drawOptions();
-	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
-
-	gc.posX += gc.speed;
-	if(gc.posX > START_OPTIONS_X &&
-	   80 <= gc.posY && gc.posY <= 115) {
-	    gc.transition(optionState);
-	} else if(gc.posX > END_X)
-	    gc.transition(beforeState);
+	let gc = gameContext;
+	    opts = gc.curve.opts;
+	_ss = opts.strokeStyle;
+	opts.strokeStyle = 'green';
+	setTimeout(function() {
+	    opts.strokeStyle = _ss;
+	}, 500);
+	gc.successCount++;
+	gc.transition(simpleState);
     },
 
-    teardown(gameContext, pitch) {
-	if(gc.speed >= 3) {
-	    gameContext.setCurve(randomCurve(7)); // TODO change difficulty?
-	    gc.speed = 2;
-	} else gc.speed = Math.min(gc.speed*1.5, 3); 
+    // consider?
+    teardown: function(gameContext, pitch) {
 	gameContext.failCount = 0;
     }
 }
 
 
 let optionState = {
+
     setup: function(gameContext, pitch) {
-	console.log('SETUP OPTIONS');
+	gameContext.render.options = false;
 	this.options = {
 	    onCancel: false,
 	    onNext: false,
 	    onToggle: false,
 	};
-	gameContext.posX = gameContext.posX || START_OPTIONS_X;
     },
+
     handlePitch: function(gameContext, pitch) {
 	let gc = gameContext,
 	    gfx = gc.gfx,
 	    m = this.options;
 
-	gfx.clearOptions();
-	gfx.slideMetronome(gc.posX);
-	updateY(gc,gfx,pitch);
 	gfx.drawOptionsMenu(this.options);
-	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
 
 	let oSelected = Object.values(this.options).some(v=>v);
 
@@ -566,23 +554,27 @@ let optionState = {
 		m.onToggle = oSelected = true;
 	}
 
-	gc.posX += gc.speed;
-
 	if(gc.posX >= END_OPTIONS_X) {
-	    gc.transition(oSelected ? beforeState: optionState);
+	    if(oSelected) gc.transition(startState );
+	    else gc.posX = START_OPTIONS_X;
 	}
     },
 
+    // FIXME remove speed and stuff
     teardown: function(gameContext, pitch) {
 	let m = this.options,
 	    gc = gameContext;
 	if(m.onToggle) gc.toggleSing();
-	else if(m.onNext) {
-	    gc.curve = null;
-	    gc.speed = Math.min(gc.speed, 2);
+
+	if(m.onNext) {
+	    gc.curve = null; 
+	    gc.successCount = 0;
+	    gc.failCount = 0;
 	}
-	if(!m.onCancel) gc.failCount = 0;
+
+	// TODO delete if not needed
 	gc.posX = 0;
+	gameContext.render.options = true;
     }
 }
 
@@ -593,9 +585,14 @@ $('document').ready(function() {
 	state: null,
 	curve: null,
 	speed: INITIAL_SPEED,
+	successCount: 0,
 	failCount: 0,
 	posX: START_X,
 	posY: 0,
+	render: {
+	    options: true,
+	    curve: true,
+	},
 	gfx: new Graphics($('canvas')[0]),
 	sing: false,
 	transition(s) {
@@ -611,7 +608,19 @@ $('document').ready(function() {
 	    this.curve = c;
 	    this.curve.opts = opts;
 	},
+	doRender: function() {
+	    this.gfx.slideMetronome(this.posX);
+	    this.gfx.clear();
+	    if(this.render.curve && this.curve)
+		this.gfx.drawCurve(this.curve);
+	    if(this.render.options)
+		this.gfx.drawOptions();
+	    this.gfx.drawTarget({ x: this.posX-10, y: this.posY-10});
+	},
 	handlePitch: function(pitch) {
+	    this.posX = this.posX += this.speed;
+	    this.posY = pitchToPos(this, pitch);
+	    this.doRender();
 	    this.state.handlePitch(this, pitch);
 	},
 	toggleSing: function() {
@@ -620,7 +629,7 @@ $('document').ready(function() {
     }
 
 
-    gameContext.transition(beforeState);
+    gameContext.transition(startState);
 
     handlePitch = p => gameContext.handlePitch(p);
 
