@@ -14,6 +14,10 @@ const OPTIONS_Y = 100;
 const ACCURACY = 20;
 
 
+// 2. test with computeBJS
+// 3. test with drawCurveBJS
+
+
 
 function pitchToPos(gc, pitch) {
     return Math.round(gc.gfx.height - heightFromPitch(gc.sing, pitch));
@@ -33,17 +37,83 @@ function heightFromPitch(doSing, p) {
 }
 
 
-let x = p => p[0];
-let y = p => p[1];
-let offset = (x,y) => p => [ p[0]+x, p[1]+y ];
+// I computed this by hand
+// only to discover the pattern later
+// below is the method lifted from bezier-js
+// notice the diagonal is the binomial term (order)
+let M6 = [[  1,   0,   0,   0,   0,   0,   0],
 
-let M7 = [[1,   0,   0,  0,  0,  0,  0],
-	  [-6,  6,   0,  0,  0,  0,  0],
-	  [15, -30, 15,  0,  0,  0,  0],
-	  [-20, 60, -60,20,  0,  0,  0],
-	  [15, -60, 90, -60, 15, 0,  0],
-	  [-6,  30, -60, 60, -30, 6, 0],
-	  [1,   -6, 15, -20, 15, -6, 1]];
+	  [ -6,   6,   0,   0,   0,   0,   0],
+
+	  [ 15, -30,  15,   0,   0,   0,   0],
+
+	  [-20,  60, -60,  20,   0,   0,   0],
+
+	  [ 15, -60,  90, -60,  15,   0,   0],
+
+	  [ -6,  30, -60,  60, -30,   6,   0],
+
+	  [  1,  -6,  15, -20,  15,  -6,   1]];
+
+var binomialCoefficients = [[1],[1,1]];
+
+function binomial(n,k) {
+  if (n===0) return 1;
+  var lut = binomialCoefficients;
+  while(n >= lut.length) {
+    var s = lut.length;
+    var nextRow = [1];
+    for(var i=1,prev=s-1; i<s; i++) {
+      nextRow[i] = lut[prev][i-1] + lut[prev][i];
+    }
+    nextRow[s] = 1;
+    lut.push(nextRow);
+  }
+  return lut[n][k];
+}
+
+// from bezier-js
+function computeMatrix(n) {
+  /*
+    We can form any basis matrix using a generative approach:
+
+     - it's an M = (n x n) matrix
+     - it's a lower triangular matrix: all the entries above the main diagonal are zero
+     - the main diagonal consists of the binomial coefficients for n
+     - all entries are symmetric about the antidiagonal.
+
+    What's more, if we number rows and columns starting at 0, then
+    the value at position M[r,c], with row=r and column=c, can be
+    expressed as:
+
+      M[r,c] = (r choose c) * M[r,r] * S,
+
+      where S = 1 if r+c is even, or -1 otherwise
+
+    That is: the values in column c are directly computed off of the
+    binomial coefficients on the main diagonal, through multiplication
+    by a binomial based on matrix position, with the sign of the value
+    also determined by matrix position. This is actually very easy to
+    write out in code:
+  */
+
+  // form the square matrix, and set it to all zeroes
+  var M = [], i = n;
+  while (i--) { M[i] = "0".repeat(n).split('').map(v => parseInt(v)); }
+
+  // populate the main diagonal
+  var k = n - 1;
+  for (i=0; i<n; i++) { M[i][i] = binomial(k, i); }
+
+  // compute the remaining values
+  for (var c=0, r; c<n; c++) {
+    for (r=c+1; r<n; r++) {
+      var sign = (r+c)%2 ? -1 : 1;
+      var value = binomial(r, c) * M[r][r];
+      M[r][c] = sign * value; }}
+
+  return M;
+}
 
 function range(n,m) {
     var nums = [];
@@ -52,23 +122,8 @@ function range(n,m) {
     return nums;
 }
 
-
-/*
-function concatQuads(pts) {
-    let start = pts[i-1];
-    let mid = pts[i];
-    let end = pts[i+1];
-    var fx = 2*x(mid) - (x(start) + x(end))/2,
-	fy = 2*y(mid) - (y(start) + y(end))/2;
-}
-
-function bezQuadratic(t,ws) {
-    let mt = 1-t;
-    let p = Math.pow;
-    return ws[0]*p(mt,6) + 2*ws[1]*p(mt,5)*t + 15*ws[2]*p(mt,4)*p(t,2) +
-}
-*/
-
+// computed this by hand, moving to more general method
+// (de Casteljau's method) from BezierJS
 function bez6(t,ws) {
     let mt = 1-t;
     let p = Math.pow;
@@ -123,13 +178,11 @@ function raiseRowPower(row,i) {
     return row.map(v => Math.pow(v,i));
 }
 
-// FIXME only works with M7 right now!!!!
-function computeMatrix(order) {
-    if(order === 6) return M7;
-    else alert('oops');
-}
 
 function randomCurve(order) {
+
+    let offset = (x,y) => p => [ p[0]+x, p[1]+y ];
+
     var points = [];
     for(var i=0; i<=order; i++) {
 	points.push([10+40*i,10+Math.round(90*Math.random())]);
@@ -138,19 +191,21 @@ function randomCurve(order) {
     px = [];
     py = [];
     rlpoints.forEach(p => {
-	px.push( [x(p)] );
-	py.push( [y(p)] );
+	px.push( [p[0]] );
+	py.push( [p[1]] );
     })
 
     let invert = matrix_invert,
-	M1 = invert(M7),
+	M = computeMatrix(order+1),
 	Tt = []; // apparently I was generating the transpose
+    console.log(M);
 
     // Equidistant time values curve-fitting
     let S = '0'.repeat(7).split('').map((_,i) => i/(7-1));
     for(var i=0; i<7; i++) Tt.push(raiseRowPower(S, i));
 
     let T = transpose(Tt),
+	M1 = invert(M),
 	TtT1 = invert(multiply(Tt,T)),
 	step1 = multiply(TtT1, Tt),
 	step2 = multiply(M1, step1),
@@ -160,7 +215,7 @@ function randomCurve(order) {
     // FIXME use only points? only controls?
     B = new Bezier(rlpoints,
 		   Cx.map((s, i) => s.concat(Cy[i])));
-    B.setMatrix(M7);
+    B.setMatrix(M);
     return B;
 }
 
@@ -212,7 +267,58 @@ class Graphics {
 	}
 	this.drawMatrix(curve);
 	this.ctx.restore();
-	//this.drawPoints(curve);
+	this.drawPoints(curve);
+    }
+
+    drawCurveBJS(curve, opts, offset) {
+	offset = offset || { x:0, y:0 };
+	this.ctx.save();
+	for(var o in opts) {
+	    this.ctx[o] = opts[o];
+	}
+	var p = curve.points;
+
+	if (p.length < 3 || 5 <= p.length) {
+	    var points = curve.getLUT(100);
+	    var p0 = points[0];
+	    points.forEach((p1,i) => {
+		if(!i) return;
+		this.drawLine(p0, p1, offset);
+		p0 = p1;
+	    });
+	    return;
+	}
+
+	var ox = offset.x + this.offset.x;
+	var oy = offset.y + this.offset.y;
+	this.ctx.beginPath();
+	this.ctx.moveTo(p[0].x + ox, p[0].y + oy);
+	if(p.length === 3) {
+	    this.ctx.quadraticCurveTo(
+		p[1].x + ox, p[1].y + oy,
+		p[2].x + ox, p[2].y + oy
+	    );
+	}
+	else if(p.length === 4) {
+	    this.ctx.bezierCurveTo(
+		p[1].x + ox, p[1].y + oy,
+		p[2].x + ox, p[2].y + oy,
+		p[3].x + ox, p[3].y + oy
+	    );
+	}
+	this.ctx.stroke();
+	this.ctx.closePath();
+	this.ctx.restore();
+    }
+
+    drawLine(p1, p2, offset) {
+	offset = offset || { x:0, y:0 };
+	var ox = offset.x + this.offset.x;
+	var oy = offset.y + this.offset.y;
+	this.ctx.beginPath();
+	this.ctx.moveTo(p1.x + ox,p1.y + oy);
+	this.ctx.lineTo(p2.x + ox,p2.y + oy);
+	this.ctx.stroke();
     }
 
     drawSegment(curve, span, opts) {
@@ -251,7 +357,8 @@ class Graphics {
 	}, opts);
     }
 
-    // consider using De Casteljau 
+    // this does computation on the fly
+    // will switch to LUT method from BezierJS
     drawMatrix(curve) {
 	let ps = curve.controls,
 	    px = [],
@@ -260,12 +367,12 @@ class Graphics {
 	    M = curve.matrix;
 
 	curve.controls.forEach(p => {
-	    px.push( [x(p)] );
-	    py.push( [y(p)] );
+	    px.push( [p[0]] );
+	    py.push( [p[1]] );
 	})
 	let start = ps[0];
 	ctx.beginPath();
-	ctx.moveTo(x(start), y(start));
+	ctx.moveTo(start[0], start[1]);
 	for(var t=0; t<1; t+= 0.01) {
 	    let T = [ range(0,7).map(k => Math.pow(t,k)) ];
 	    let PART_X = multiply(M, px);
@@ -282,7 +389,7 @@ class Graphics {
 	curve.points.forEach(function(e){
 	    ctx.fillStyle = 'red';
 	    ctx.beginPath();
-	    ctx.arc(x(e),y(e),3,0,2*Math.PI)
+	    ctx.arc(e[0],e[1],3,0,2*Math.PI)
 	    ctx.closePath();
 	    ctx.fill();
 	    });
@@ -358,6 +465,91 @@ class Bezier {
 	}
     }
 
+    computeBZJ(t) {
+      // shortcuts
+      if (t === 0) {
+        return this.points[0];
+      }
+      if (t === 1) {
+        return this.points[this.order];
+      }
+
+      var p = this.points;
+      var mt = 1 - t;
+
+      // linear?
+      if (this.order === 1) {
+        ret = {
+          x: mt * p[0].x + t * p[1].x,
+          y: mt * p[0].y + t * p[1].y
+        };
+        if (this._3d) {
+          ret.z = mt * p[0].z + t * p[1].z;
+        }
+        return ret;
+      }
+
+      // quadratic/cubic curve?
+      if (this.order < 4) {
+        var mt2 = mt * mt,
+          t2 = t * t,
+          a,
+          b,
+          c,
+          d = 0;
+        if (this.order === 2) {
+          p = [p[0], p[1], p[2], ZERO];
+          a = mt2;
+          b = mt * t * 2;
+          c = t2;
+        } else if (this.order === 3) {
+          a = mt2 * mt;
+          b = mt2 * t * 3;
+          c = mt * t2 * 3;
+          d = t * t2;
+        }
+        var ret = {
+          x: a * p[0].x + b * p[1].x + c * p[2].x + d * p[3].x,
+          y: a * p[0].y + b * p[1].y + c * p[2].y + d * p[3].y
+        };
+        if (this._3d) {
+          ret.z = a * p[0].z + b * p[1].z + c * p[2].z + d * p[3].z;
+        }
+        return ret;
+      }
+
+      // higher order curves: use de Casteljau's computation
+      var dCpts = JSON.parse(JSON.stringify(this.points));
+      while (dCpts.length > 1) {
+        for (var i = 0; i < dCpts.length - 1; i++) {
+          dCpts[i] = {
+            x: dCpts[i].x + (dCpts[i + 1].x - dCpts[i].x) * t,
+            y: dCpts[i].y + (dCpts[i + 1].y - dCpts[i].y) * t
+          };
+          if (typeof dCpts[i].z !== "undefined") {
+            dCpts[i] = dCpts[i].z + (dCpts[i + 1].z - dCpts[i].z) * t;
+          }
+        }
+        dCpts.splice(dCpts.length - 1, 1);
+      }
+      return dCpts[0];
+    }
+
+    getLUT(steps) {
+	steps = steps || 100;
+	if (this._lut.length === steps) {
+	    return this._lut;
+	}
+	this._lut = [];
+	// We want a range from 0 to 1 inclusive, so
+	// we decrement and then use <= rather than <:
+	steps--;
+	for (var t = 0; t <= steps; t++) {
+	    this._lut.push(this.compute(t / steps));
+	}
+	return this._lut;
+    }
+
     computeX(t) {
 	return this.compute(t, this.controls.xs);
     }
@@ -390,7 +582,7 @@ let startState  = {
 
 	// need a curve, perdiod!
 	if(!gc.curve)
-	    gc.setCurve(randomCurve(7)); // TODO difficulty
+	    gc.setCurve(randomCurve(6)); // TODO difficulty
 
 	gc.render.curve = OUTCURVE;
 
@@ -583,6 +775,7 @@ $('document').ready(function() {
 	state: null,
 	curve: null,
 	speed: INITIAL_SPEED,
+	difficulty: 1,
 	successCount: 0,
 	failCount: 0,
 	posX: START_X,
@@ -610,9 +803,11 @@ $('document').ready(function() {
 	    this.gfx.slideMetronome(this.posX);
 	    this.gfx.clear();
 	    if(this.curve) {
-		let cs = curveStyles.def[this.render.curve],
-		    opts = { strokeStyle: cs.outline, lineWidth: 7 },
+		let type = this.render.success ? SUCCESS : this.render.curve,
+		    cs = curveStyles.def[type],
+		    opts = { strokeStyle: cs.outline, lineWidth: 7 };
 		    hopts = { strokeStyle: cs.accent, lineWidth: opts.lineWidth-1};
+
 		this.gfx.drawCurve(this.curve, opts);
 		this.gfx.drawCurve(this.curve, hopts);
 		if(this.render.segment) {
