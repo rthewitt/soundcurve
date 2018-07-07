@@ -52,7 +52,24 @@ function range(n,m) {
     return nums;
 }
 
-function bez7(t,ws) {
+
+/*
+function concatQuads(pts) {
+    let start = pts[i-1];
+    let mid = pts[i];
+    let end = pts[i+1];
+    var fx = 2*x(mid) - (x(start) + x(end))/2,
+	fy = 2*y(mid) - (y(start) + y(end))/2;
+}
+
+function bezQuadratic(t,ws) {
+    let mt = 1-t;
+    let p = Math.pow;
+    return ws[0]*p(mt,6) + 2*ws[1]*p(mt,5)*t + 15*ws[2]*p(mt,4)*p(t,2) +
+}
+*/
+
+function bez6(t,ws) {
     let mt = 1-t;
     let p = Math.pow;
     return ws[0]*p(mt,6) + 6*ws[1]*p(mt,5)*t + 15*ws[2]*p(mt,4)*p(t,2) +
@@ -108,13 +125,13 @@ function raiseRowPower(row,i) {
 
 // FIXME only works with M7 right now!!!!
 function computeMatrix(order) {
-    if(order === 7) return M7;
+    if(order === 6) return M7;
     else alert('oops');
 }
 
 function randomCurve(order) {
     var points = [];
-    for(var i=0; i<order; i++) {
+    for(var i=0; i<=order; i++) {
 	points.push([10+40*i,10+Math.round(90*Math.random())]);
     }
     let rlpoints = points.map(offset(350,150));
@@ -160,10 +177,6 @@ class Graphics {
 	    this.images[img.name] = new Image();
 	    this.images[img.name].src = img.src;
 	});
-	this.baseStyle = {
-	    'strokeStyle': 'blue',
-	    'lineWidth': '7'
-	}
     }
 
 
@@ -194,32 +207,12 @@ class Graphics {
 
     drawCurve(curve, opts) {
 	this.ctx.save();
-	let _opts = curve.opts || {};
-	opts = Object.assign({}, _opts, opts);
-	//opts = opts || curve.opts;
 	for(var o in opts) {
 	    this.ctx[o] = opts[o];
 	}
 	this.drawMatrix(curve);
 	this.ctx.restore();
 	//this.drawPoints(curve);
-    }
-
-    highlightCurve(curve, opts) {
-	/*
-	let _opts = curve.opts || {};
-	opts = Object.assign({}, _opts, opts);
-	this.drawCurve(curve, opts);
-	let _opts = curve.opts || {};
-	opts = Object.assign({}, _opts, opts);
-	*/
-	let _opts = curve.opts || {};
-	opts = Object.assign({}, _opts, opts);
-	let n = Number.parseInt(opts.lineWidth);
-	Object.assign(opts, {
-	    'lineWidth': (n-1).toString(),
-	    'strokeStyle': 'yellow'});
-	this.drawCurve(curve, opts);
     }
 
     drawSegment(curve, span, opts) {
@@ -328,9 +321,8 @@ class Graphics {
 
 class Bezier {
 
-    // FIXME use only points? only controls?
     constructor(points, controls) {
-	this.order = controls.length;
+	this.order = controls.length-1;
 	this.points = points;
 	this.controls = controls;
 	this.controls.xs = controls.map(p => p[0]);
@@ -350,7 +342,7 @@ class Bezier {
     }
 
     get endX() {
-	return this.controls[this.order-1][0]; // FIXME order is off-by-one
+	return this.controls[this.order][0];
     }
 
     get width() {
@@ -359,7 +351,11 @@ class Bezier {
 
     // FIXME make generic
     compute(t, vals) {
-	return bez7(t, vals);
+	if(this.order == 6) {
+	return bez6(t, vals);
+	} else if(this.order == 2) {
+	    return bezQuadratic();
+	}
     }
 
     computeX(t) {
@@ -396,6 +392,7 @@ let startState  = {
 	if(!gc.curve)
 	    gc.setCurve(randomCurve(7)); // TODO difficulty
 
+	gc.render.curve = OUTCURVE;
 
 	// we want consecutive successes
 	if(!!gc.failCount) {
@@ -435,10 +432,6 @@ let startState  = {
 
 let simpleState = {
     
-    setup: function(gc) {
-	gc.render.highlite = true;
-    },
-
     handlePitch: function(gameContext, pitch) {
 	let gc = gameContext,
 	    state;
@@ -455,17 +448,16 @@ let simpleState = {
 
 	if(state) gameContext.transition(state);
     },
-    
-    teardown: function(gc) {
-	gc.render.highlite = false;
-    }
 }
 
 
 let tryState = {
 
-    setup: function() {
+    setup: function(gameContext) {
 	this.failed = false;
+	this.prevStyle = gameContext.render.curve;
+	gameContext.render.curve = INCURVE;
+	gameContext.render.segment = true;
     },
 
     handlePitch: function(gameContext, pitch) {
@@ -477,14 +469,7 @@ let tryState = {
 	    y = gc.curve.computeY(t),
 	    valid = Math.abs(gc.posY - y) < ACCURACY;
 
-	if(valid) gfx.drawCurve(gc.curve);
-	else gfx.highlightCurve(gc.curve);
-
-	let opts = {
-	    lineWidth: '5',
-	    strokeStyle: valid ? 'yellow' : 'blue'
-	};
-	gfx.drawSegmentDelta(gc.curve, t, 0.02, opts);
+	gc.render.curve = valid ? INCURVE : OUTCURVE;
 
 	if(!valid) this.failed = true;
 
@@ -495,6 +480,8 @@ let tryState = {
 
     teardown: function(gameContext, pitch) {
 	if(this.failed) gameContext.failCount++;
+	gameContext.render.curve = this.prevStyle;
+	gameContext.render.segment = false;
     }
 }
 
@@ -507,20 +494,18 @@ let successState = {
 
     handlePitch: function(gameContext, pitch) {
 	let gc = gameContext;
-	    opts = gc.curve.opts;
-	_ss = opts.strokeStyle;
-	opts.strokeStyle = 'green';
-	setTimeout(function() {
-	    opts.strokeStyle = _ss;
-	}, 500);
+	gc.render.success = true;
 	gc.successCount++;
+	gc.failCount = 0;
 	gc.transition(simpleState);
     },
 
-    // consider?
     teardown: function(gameContext, pitch) {
-	gameContext.failCount = 0;
-    }
+	// only in success for one frame
+	setTimeout(function() {
+	    gameContext.render.success = false;
+	}, 500);
+    },
 }
 
 
@@ -541,6 +526,7 @@ let optionState = {
 	    m = this.options;
 
 	gfx.drawOptionsMenu(this.options);
+	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
 
 	let oSelected = Object.values(this.options).some(v=>v);
 
@@ -579,6 +565,18 @@ let optionState = {
 }
 
 
+const OUTCURVE = 0,
+      INCURVE = 1,
+      SUCCESS = 2,
+      FAILURE = 3;
+const curveStyles = {
+    names: ['OUTCURVE, INCURVE', 'SUCCESS', 'FAILURE'],
+    def: [{outline: 'blue', accent: 'yellow', segment: 'blue'},
+	  {outline: 'yellow', accent: 'blue', segment: 'yellow'},
+	  {outline: 'yellow', accent: 'green', segment: 'white'},
+	  {outline: 'blue', accent: 'yellow', segment: 'blue'}]
+};
+
 $('document').ready(function() {
 
     let gameContext = {
@@ -590,8 +588,11 @@ $('document').ready(function() {
 	posX: START_X,
 	posY: 0,
 	render: {
+	    success: false,
+	    failure: false,
+	    segment: false,
 	    options: true,
-	    curve: true,
+	    curve: OUTCURVE
 	},
 	gfx: new Graphics($('canvas')[0]),
 	sing: false,
@@ -602,17 +603,24 @@ $('document').ready(function() {
 	    if(s.setup) s.setup(this);
 	    this.state = s;
 	},
-	setCurve: function(c, opts) {
-	    opts = opts ||
-		Object.assign({}, this.gfx.baseStyle);
+	setCurve: function(c) {
 	    this.curve = c;
-	    this.curve.opts = opts;
 	},
 	doRender: function() {
 	    this.gfx.slideMetronome(this.posX);
 	    this.gfx.clear();
-	    if(this.render.curve && this.curve)
-		this.gfx.drawCurve(this.curve);
+	    if(this.curve) {
+		let cs = curveStyles.def[this.render.curve],
+		    opts = { strokeStyle: cs.outline, lineWidth: 7 },
+		    hopts = { strokeStyle: cs.accent, lineWidth: opts.lineWidth-1};
+		this.gfx.drawCurve(this.curve, opts);
+		this.gfx.drawCurve(this.curve, hopts);
+		if(this.render.segment) {
+		    let t = this.curve.map(this.posX),
+			sopts = { strokeStyle: cs.outline, lineWidth: 5 };
+		    this.gfx.drawSegmentDelta(this.curve, t, 0.02, sopts);
+		}
+	    }
 	    if(this.render.options)
 		this.gfx.drawOptions();
 	    this.gfx.drawTarget({ x: this.posX-10, y: this.posY-10});
