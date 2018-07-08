@@ -11,12 +11,7 @@ const END_X = 750;
 const START_OPTIONS_X = END_X-40;
 const END_OPTIONS_X = 950;
 const OPTIONS_Y = 100;
-const ACCURACY = 20;
-
-
-// 2. test with computeBJS
-// 3. test with drawCurveBJS
-
+const ACCURACY = 80;
 
 
 function pitchToPos(gc, pitch) {
@@ -181,18 +176,21 @@ function raiseRowPower(row,i) {
 
 function randomCurve(order) {
 
-    let offset = (x,y) => p => [ p[0]+x, p[1]+y ];
+    let offset = (x,y) => p => ({ x: p.x+x, y: p.y+y });
 
     var points = [];
     for(var i=0; i<=order; i++) {
-	points.push([10+40*i,10+Math.round(90*Math.random())]);
+	points.push({
+	    x: 10+40*i,
+	    y: 10+Math.round(90*Math.random())
+	});
     }
-    let rlpoints = points.map(offset(350,150));
+    points = points.map(offset(350,150));
     px = [];
     py = [];
-    rlpoints.forEach(p => {
-	px.push( [p[0]] );
-	py.push( [p[1]] );
+    points.forEach(p => {
+	px.push( [p.x] );
+	py.push( [p.y] );
     })
 
     let invert = matrix_invert,
@@ -201,8 +199,8 @@ function randomCurve(order) {
     console.log(M);
 
     // Equidistant time values curve-fitting
-    let S = '0'.repeat(7).split('').map((_,i) => i/(7-1));
-    for(var i=0; i<7; i++) Tt.push(raiseRowPower(S, i));
+    let S = '0'.repeat(order+1).split('').map((_,i) => i/(order));
+    for(var i=0; i<=order; i++) Tt.push(raiseRowPower(S, i));
 
     let T = transpose(Tt),
 	M1 = invert(M),
@@ -212,9 +210,8 @@ function randomCurve(order) {
 	Cx = multiply(step2, px),
 	Cy = multiply(step2, py);
 
-    // FIXME use only points? only controls?
-    B = new Bezier(rlpoints,
-		   Cx.map((s, i) => s.concat(Cy[i])));
+    B = new Bezier(points,
+		   Cx.map((s, i) => ({x: s[0], y: Cy[i][0]})));
     B.setMatrix(M);
     return B;
 }
@@ -260,6 +257,7 @@ class Graphics {
 	this.ctx.drawImage(this.images.reticle, pos.x, pos.y, 20, 20);
     }
 
+    /*
     drawCurve(curve, opts) {
 	this.ctx.save();
 	for(var o in opts) {
@@ -269,23 +267,27 @@ class Graphics {
 	this.ctx.restore();
 	this.drawPoints(curve);
     }
+    */
 
-    drawCurveBJS(curve, opts, offset) {
+    drawCurve(curve, opts, offset) {
 	offset = offset || { x:0, y:0 };
 	this.ctx.save();
 	for(var o in opts) {
 	    this.ctx[o] = opts[o];
 	}
 	var p = curve.points;
-
 	if (p.length < 3 || 5 <= p.length) {
 	    var points = curve.getLUT(100);
 	    var p0 = points[0];
+	    this.ctx.beginPath();
+	    this.ctx.moveTo(p0.x,p0.y);
 	    points.forEach((p1,i) => {
 		if(!i) return;
-		this.drawLine(p0, p1, offset);
+		this.ctx.lineTo(p0.x, p0.y, p1.x, p1.y);
 		p0 = p1;
 	    });
+	    this.ctx.stroke();
+	    this.drawPoints(curve);
 	    return;
 	}
 
@@ -311,16 +313,9 @@ class Graphics {
 	this.ctx.restore();
     }
 
-    drawLine(p1, p2, offset) {
-	offset = offset || { x:0, y:0 };
-	var ox = offset.x + this.offset.x;
-	var oy = offset.y + this.offset.y;
-	this.ctx.beginPath();
-	this.ctx.moveTo(p1.x + ox,p1.y + oy);
-	this.ctx.lineTo(p2.x + ox,p2.y + oy);
-	this.ctx.stroke();
-    }
-
+    // TODO FIXME optimize using curve LUT
+    // to avoid recomputing all the time
+    // shifting indices, not shifting
     drawSegment(curve, span, opts) {
 	span = span || { start: 0, end: 1 }; 
 
@@ -335,15 +330,15 @@ class Graphics {
 	for(var o in opts) {
 	    this.ctx[o] = opts[o];
 	}
+
+
 	ctx.beginPath();
-	ctx.moveTo(curve.computeX(span.start),
-		   curve.computeY(span.start));
+	var p = curve.compute(span.start);
+	ctx.moveTo(p.x, p.y);
 	var t;
 	for(t = span.start; t <= span.end; t += 0.01) {
-	    ctx.lineTo(
-		curve.computeX(t),
-		curve.computeY(t)
-	    );
+	    p = curve.compute(t);
+	    ctx.lineTo(p.x, p.y);
 	}
 	ctx.stroke();
 	ctx.restore();
@@ -367,14 +362,14 @@ class Graphics {
 	    M = curve.matrix;
 
 	curve.controls.forEach(p => {
-	    px.push( [p[0]] );
-	    py.push( [p[1]] );
+	    px.push( [p.x] );
+	    py.push( [p.y] );
 	})
 	let start = ps[0];
 	ctx.beginPath();
-	ctx.moveTo(start[0], start[1]);
+	ctx.moveTo(start.x, start.y);
 	for(var t=0; t<1; t+= 0.01) {
-	    let T = [ range(0,7).map(k => Math.pow(t,k)) ];
+	    let T = [ range(0,curve.order+1).map(k => Math.pow(t,k)) ];
 	    let PART_X = multiply(M, px);
 	    let PART_Y = multiply(M, py);
 	    ctx.lineTo(multiply(T, PART_X), multiply(T, PART_Y));
@@ -389,7 +384,7 @@ class Graphics {
 	curve.points.forEach(function(e){
 	    ctx.fillStyle = 'red';
 	    ctx.beginPath();
-	    ctx.arc(e[0],e[1],3,0,2*Math.PI)
+	    ctx.arc(e.x,e.y,3,0,2*Math.PI)
 	    ctx.closePath();
 	    ctx.fill();
 	    });
@@ -432,8 +427,9 @@ class Bezier {
 	this.order = controls.length-1;
 	this.points = points;
 	this.controls = controls;
-	this.controls.xs = controls.map(p => p[0]);
-	this.controls.ys = controls.map(p => p[1]);
+	this.controls.xs = controls.map(p => p.x);
+	this.controls.ys = controls.map(p => p.y);
+	this._lut = [];
     }
 
     // FIXME only temporary
@@ -445,11 +441,11 @@ class Bezier {
     }
 
     get startX() {
-	return this.controls[0][0];
+	return this.controls[0].x;
     }
 
     get endX() {
-	return this.controls[this.order][0];
+	return this.controls[this.order].x;
     }
 
     get width() {
@@ -457,24 +453,26 @@ class Bezier {
     }
 
     // FIXME make generic
-    compute(t, vals) {
-	if(this.order == 6) {
-	return bez6(t, vals);
-	} else if(this.order == 2) {
-	    return bezQuadratic();
-	}
+    /*
+    compute(t) {
+	return {
+	    x: bez6(t, this.controls.xs),
+	    y: bez6(t, this.controls.ys)
+	       };
     }
+    */
 
-    computeBZJ(t) {
+    compute(t) {
       // shortcuts
       if (t === 0) {
-        return this.points[0];
+        return this.controls[0];
       }
       if (t === 1) {
-        return this.points[this.order];
+        return this.controls[this.order];
       }
 
-      var p = this.points;
+	/*
+      var p = this.controls;
       var mt = 1 - t;
 
       // linear?
@@ -517,9 +515,23 @@ class Bezier {
         }
         return ret;
       }
+      */
+
+	// that general method may be too expensive...
+	// but I have a major leak elsewhere
+	switch(this.order) {
+	case 6:
+	    return {
+		x: bez6(t, this.controls.xs),
+		y: bez6(t, this.controls.ys)
+	    }
+	    break;
+	}
+
+	console.log('NOT OPTIMIZED??!!!');
 
       // higher order curves: use de Casteljau's computation
-      var dCpts = JSON.parse(JSON.stringify(this.points));
+      var dCpts = JSON.parse(JSON.stringify(this.controls));
       while (dCpts.length > 1) {
         for (var i = 0; i < dCpts.length - 1; i++) {
           dCpts[i] = {
@@ -550,14 +562,6 @@ class Bezier {
 	return this._lut;
     }
 
-    computeX(t) {
-	return this.compute(t, this.controls.xs);
-    }
-
-    computeY(t) {
-	return this.compute(t, this.controls.ys);
-    }
-
     inboundX(x) {
 	if(x < this.startX
 	   || x > this.endX) return false;
@@ -577,10 +581,9 @@ class Bezier {
 
 let startState  = {
     
-    setup: function(gameContext, pitch) {
-	let gc = gameContext;
+    setup: function(gc) {
 
-	// need a curve, perdiod!
+	// need a curve, period!
 	if(!gc.curve)
 	    gc.setCurve(randomCurve(6)); // TODO difficulty
 
@@ -601,7 +604,7 @@ let startState  = {
 	if(!!gc.successCount && gc.speed >= 3) {
 	    console.log('MASTERED!');
 	    gc.speed = INITIAL_SPEED;
-	    gc.setCurve(randomCurve(7));
+	    gc.setCurve(randomCurve(6));
 	    gc.successCount = 0;
 	    gc.failCount = 0;
 	}
@@ -616,17 +619,16 @@ let startState  = {
 	gc.posX = gc.curve.startX - 55 * gc.speed;
     },
 
-    handlePitch: function(gameContext, pitch) {
-	gameContext.transition(simpleState);
+    handle: function(gc) {
+	gc.transition(simpleState);
     }
 
 }
 
 let simpleState = {
     
-    handlePitch: function(gameContext, pitch) {
-	let gc = gameContext,
-	    state;
+    handle: function(gc) {
+	let state;
 
 	if(gc.curve.inboundX(gc.posX))
 	    state = tryState;
@@ -638,27 +640,27 @@ let simpleState = {
 	else if(gc.posX > END_X)
 	    state = startState;
 
-	if(state) gameContext.transition(state);
+	if(state) gc.transition(state);
     },
 }
 
 
 let tryState = {
 
-    setup: function(gameContext) {
+    setup: function(gc) {
 	this.failed = false;
-	this.prevStyle = gameContext.render.curve;
-	gameContext.render.curve = INCURVE;
-	gameContext.render.segment = true;
+	this.prevStyle = gc.render.curve;
+	gc.render.curve = INCURVE;
+	gc.render.segment = true;
     },
 
-    handlePitch: function(gameContext, pitch) {
+    handle: function(gc) {
 
-	let gc = gameContext,
-	    gfx = gc.gfx;
+	let gfx = gc.gfx;
 
 	let t = gc.curve.map(gc.posX),
-	    y = gc.curve.computeY(t),
+	    // y = gc.curve.compute(t).y,
+	    y = bez6(t, gc.curve.controls.ys), // FIXME TODO profile memory
 	    valid = Math.abs(gc.posY - y) < ACCURACY;
 
 	gc.render.curve = valid ? INCURVE : OUTCURVE;
@@ -670,32 +672,31 @@ let tryState = {
 			  simpleState : successState);
     },
 
-    teardown: function(gameContext, pitch) {
-	if(this.failed) gameContext.failCount++;
-	gameContext.render.curve = this.prevStyle;
-	gameContext.render.segment = false;
+    teardown: function(gc) {
+	if(this.failed) gc.failCount++;
+	gc.render.curve = this.prevStyle;
+	gc.render.segment = false;
     }
 }
 
 
 let successState = {
 
-    setup: function(gameContext, pitch) {
+    setup: function(gc) {
 	console.log('SUCCESS!!');
     },
 
-    handlePitch: function(gameContext, pitch) {
-	let gc = gameContext;
+    handle: function(gc) {
 	gc.render.success = true;
 	gc.successCount++;
 	gc.failCount = 0;
 	gc.transition(simpleState);
     },
 
-    teardown: function(gameContext, pitch) {
+    teardown: function(gc) {
 	// only in success for one frame
 	setTimeout(function() {
-	    gameContext.render.success = false;
+	    gc.render.success = false;
 	}, 500);
     },
 }
@@ -703,8 +704,8 @@ let successState = {
 
 let optionState = {
 
-    setup: function(gameContext, pitch) {
-	gameContext.render.options = false;
+    setup: function(gc) {
+	gc.render.options = false;
 	this.options = {
 	    onCancel: false,
 	    onNext: false,
@@ -712,13 +713,11 @@ let optionState = {
 	};
     },
 
-    handlePitch: function(gameContext, pitch) {
-	let gc = gameContext,
-	    gfx = gc.gfx,
-	    m = this.options;
+    handle: function(gc) {
+	let m = this.options;
 
-	gfx.drawOptionsMenu(this.options);
-	gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+	gc.gfx.drawOptionsMenu(this.options);
+	gc.gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
 
 	let oSelected = Object.values(this.options).some(v=>v);
 
@@ -738,10 +737,8 @@ let optionState = {
 	}
     },
 
-    // FIXME remove speed and stuff
-    teardown: function(gameContext, pitch) {
-	let m = this.options,
-	    gc = gameContext;
+    teardown: function(gc) {
+	let m = this.options;
 	if(m.onToggle) gc.toggleSing();
 
 	if(m.onNext) {
@@ -752,7 +749,7 @@ let optionState = {
 
 	// TODO delete if not needed
 	gc.posX = 0;
-	gameContext.render.options = true;
+	gc.render.options = true;
     }
 }
 
@@ -789,7 +786,7 @@ $('document').ready(function() {
 	},
 	gfx: new Graphics($('canvas')[0]),
 	sing: false,
-	transition(s) {
+	transition: function(s) {
 	    if(this.state && this.state.teardown) {
 		this.state.teardown(this);
 	    }
@@ -804,7 +801,7 @@ $('document').ready(function() {
 	    this.gfx.clear();
 	    if(this.curve) {
 		let type = this.render.success ? SUCCESS : this.render.curve,
-		    cs = curveStyles.def[type],
+		    cs = curveStyles.def[type];
 		    opts = { strokeStyle: cs.outline, lineWidth: 7 };
 		    hopts = { strokeStyle: cs.accent, lineWidth: opts.lineWidth-1};
 
@@ -824,7 +821,7 @@ $('document').ready(function() {
 	    this.posX = this.posX += this.speed;
 	    this.posY = pitchToPos(this, pitch);
 	    this.doRender();
-	    this.state.handlePitch(this, pitch);
+	    this.state.handle(this);
 	},
 	toggleSing: function() {
 	    this.sing = !this.sing;
