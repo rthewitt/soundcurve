@@ -81,44 +81,83 @@ Microphone.prototype.onMicAudioSuccess = function(stream) {
     analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     this.mediaStreamSource.connect( analyser );
-    updatePitch();
-}
-
-// I may be able to move my pitchBuffer noise/smoothing into existing structure
-function updatePitch() {
-    analyser.getFloatTimeDomainData( buf );
-    var pitch = audio.autoCorrelate( buf, audioContext.sampleRate );
-
-    let pb = mic.pitchBuffer,
-        pl = pb.length,
-        prevPitch = !! pl ? pb[pl-1] : 0;
-
-    // pitch was garbled, or inhuman
-    if(pitch == -1 || pitch > 4700) // world record is 4186
-	pitch = prevPitch;
-
-    // an abrupt change just be noise
-    // we give a grace period of 3 samples
-    // meanwhile feed them the last detected pitch
-    // improvement: calculate where their voice is going
-    let abrupt = Math.abs(prevPitch-pitch) > sensibleChange;
-    if(abrupt) {
-	if(mic.mightStillBeNoise) {
-	    mic.noiseLessLikely();
-	    pitch = prevPitch; // assume no change
-	} else mic.resetNoiseDetection(pitch);
-    }
-
-    pitch = mic.smoothPitch(pitch);
-
-
-    handlePitch(pitch);
-
     if (!window.requestAnimationFrame)
 	window.requestAnimationFrame = window.webkitRequestAnimationFrame;
+    requestAnimationFrame(updatePitch);
+}
+
+var lastFrameTimeMs = 0,
+    maxFPS = 60,
+    timeDelta = 0,
+    timestep = 1000 / 60;
+
+
+
+// I may be able to move my pitchBuffer noise/smoothing into existing structure
+function updatePitch(timestamp) { // confusing argument, this is mainloop
+
+    if(timestamp < lastFrameTimeMs + (1000 / maxFPS)) {
+	window.requestAnimationFrame(updatePitch);
+	return;
+    }
+
+    timeDelta = timestamp - lastFrameTimeMs; 
+    lastFrameTimeMs = timestamp;
+
+    var numUpdateSteps = 0;
+
+    // oh boy...
+    while(timeDelta >= timestep) {
+
+	analyser.getFloatTimeDomainData( buf );
+	var pitch = audio.autoCorrelate( buf, audioContext.sampleRate );
+
+	let pb = mic.pitchBuffer,
+	    pl = pb.length,
+	    prevPitch = !! pl ? pb[pl-1] : 0;
+
+	// pitch was garbled, or inhuman
+	if(pitch == -1 || pitch > 4700) // world record is 4186
+	    pitch = prevPitch;
+
+	// an abrupt change just be noise
+	// we give a grace period of 3 samples
+	// meanwhile feed them the last detected pitch
+	// improvement: calculate where their voice is going
+	let abrupt = Math.abs(prevPitch-pitch) > sensibleChange;
+	if(abrupt) {
+	    if(mic.mightStillBeNoise) {
+		mic.noiseLessLikely();
+		pitch = prevPitch; // assume no change
+	    } else mic.resetNoiseDetection(pitch);
+	}
+
+	pitch = mic.smoothPitch(pitch);
+
+	// update but do not render
+	handlePitch(pitch, timeDelta, false);
+
+
+	// oh boy
+	timeDelta -= timestep;
+	if(++numUpdateSteps >= 240) {
+	    panic();
+	    break;
+	}
+    }
+
+    // update and render because I can't "just render" atm
+    handlePitch(pitch, timeDelta, true);
+
+
     rafID = window.requestAnimationFrame( updatePitch );
 
 }
+
+    function panic() {
+	timeDelta = 0;
+	console.log('FRAME PANIC - game loop FPS complexity in microphone');
+    }
 
 window.Microphone = Microphone;
 })();

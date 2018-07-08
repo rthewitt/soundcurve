@@ -5,19 +5,25 @@
 // TODO Encapsulate constants
 
 // instead of whistling
-const INITIAL_SPEED = 2;
-const START_X = 250;
+
+const ZERO = { x: 0, y: 0, z: 0 };
+const MIN_SPEED = 0.1;
+const INITIAL_SPEED = 0.1;
+const MAX_SPEED = 0.2;
+const START_X = 100;
 const END_X = 750;
 const START_OPTIONS_X = END_X-40;
 const END_OPTIONS_X = 950;
 const OPTIONS_Y = 100;
-const ACCURACY = 80;
+const ACCURACY = 20;
 
 
 function pitchToPos(gc, pitch) {
     return Math.round(gc.gfx.height - heightFromPitch(gc.sing, pitch));
 }
 
+
+// TODO custom vocal ranges
 function heightFromPitch(doSing, p) {
     if(doSing) {
 	// not 2 octaves, not same notes...
@@ -181,11 +187,11 @@ function randomCurve(order) {
     var points = [];
     for(var i=0; i<=order; i++) {
 	points.push({
-	    x: 10+40*i,
-	    y: 10+Math.round(90*Math.random())
+	    x: i*Math.floor(240.0/order),
+	    y: Math.round(90*Math.random())
 	});
     }
-    points = points.map(offset(350,150));
+    points = points.map(offset(360,160));
     px = [];
     py = [];
     points.forEach(p => {
@@ -196,7 +202,6 @@ function randomCurve(order) {
     let invert = matrix_invert,
 	M = computeMatrix(order+1),
 	Tt = []; // apparently I was generating the transpose
-    console.log(M);
 
     // Equidistant time values curve-fitting
     let S = '0'.repeat(order+1).split('').map((_,i) => i/(order));
@@ -275,7 +280,7 @@ class Graphics {
 	for(var o in opts) {
 	    this.ctx[o] = opts[o];
 	}
-	var p = curve.points;
+	var p = curve.controls;
 	if (p.length < 3 || 5 <= p.length) {
 	    var points = curve.getLUT(100);
 	    var p0 = points[0];
@@ -291,8 +296,8 @@ class Graphics {
 	    return;
 	}
 
-	var ox = offset.x + this.offset.x;
-	var oy = offset.y + this.offset.y;
+	var ox = offset.x;
+	var oy = offset.y;
 	this.ctx.beginPath();
 	this.ctx.moveTo(p[0].x + ox, p[0].y + oy);
 	if(p.length === 3) {
@@ -311,6 +316,7 @@ class Graphics {
 	this.ctx.stroke();
 	this.ctx.closePath();
 	this.ctx.restore();
+	this.drawPoints(curve);
     }
 
     // TODO FIXME optimize using curve LUT
@@ -409,9 +415,10 @@ class Graphics {
 	this.drawOption([255,165,0, 0.2], [x1, OPTIONS_Y], !!menu);
 	if(menu) {
 	    let m = menu;
-	    this.drawOption([128,128,128], [x2, 280], m.onCancel);
-	    this.drawOption([216,191,216], [x2, 230], m.onNext);
-	    this.drawOption([255, 99, 71], [x2, 180], m.onToggle);
+	    this.drawOption([128,128,128], [x2, OPTIONS_Y], m.onCancel);
+	    this.drawOption([168,235, 65], [x2, 180], m.onBack);
+	    this.drawOption([255, 99, 71], [x2, 230], m.onNext);
+	    this.drawOption([216,191,216], [x2, 280], m.onToggle);
 	}
     }
 
@@ -471,7 +478,6 @@ class Bezier {
         return this.controls[this.order];
       }
 
-	/*
       var p = this.controls;
       var mt = 1 - t;
 
@@ -515,7 +521,6 @@ class Bezier {
         }
         return ret;
       }
-      */
 
 	// that general method may be too expensive...
 	// but I have a major leak elsewhere
@@ -528,7 +533,7 @@ class Bezier {
 	    break;
 	}
 
-	console.log('NOT OPTIMIZED??!!!');
+	// console.log('NOT OPTIMIZED??!!!');
 
       // higher order curves: use de Casteljau's computation
       var dCpts = JSON.parse(JSON.stringify(this.controls));
@@ -583,9 +588,12 @@ let startState  = {
     
     setup: function(gc) {
 
+	
 	// need a curve, period!
-	if(!gc.curve)
-	    gc.setCurve(randomCurve(6)); // TODO difficulty
+	if(!gc.curve) { // game starts with null
+	    console.warn('curve not set for this round'); // otherwise unexpected
+	    gc.easierCurve();
+	}
 
 	gc.render.curve = OUTCURVE;
 
@@ -594,33 +602,32 @@ let startState  = {
 	    gc.successCount = 0;
 	    // need something a little easier
 	    if(gc.failCount >= 3) {
-		gc.speed = Math.min(Math.max(gc.speed-1, 1), 2);
+		gc.speed = Math.min(Math.max(gc.speed-0.1, MIN_SPEED), MAX_SPEED);
 		gc.failCount = 0;
 		console.log('BOOTED, speed=',gc.speed);
 	    }
 	}
 
 	// need another challenge!
-	if(!!gc.successCount && gc.speed >= 3) {
+	if(!!gc.successCount && gc.speed >= MAX_SPEED) {
 	    console.log('MASTERED!');
-	    gc.speed = INITIAL_SPEED;
-	    gc.setCurve(randomCurve(6));
-	    gc.successCount = 0;
-	    gc.failCount = 0;
+	    gc.harderCurve();
 	}
 
 	// just need to speed things up a little
 	if(!!gc.successCount) {
 	    console.log("Congrats!  Let's go faster...");
-	    gc.speed = Math.min(gc.speed*1.5, 3); 
+	    gc.speed = Math.min(gc.speed*1.5, MAX_SPEED); 
 	}
 
 	// start position (depends on speed)
-	gc.posX = gc.curve.startX - 55 * gc.speed;
+	// FIXME
+	gc.posX = START_X;
+	// gc.posX = gc.curve.startX - 55 * gc.speed;
     },
 
     handle: function(gc) {
-	gc.transition(simpleState);
+	return simpleState;
     }
 
 }
@@ -628,19 +635,19 @@ let startState  = {
 let simpleState = {
     
     handle: function(gc) {
-	let state;
+	//let state;
 
 	if(gc.curve.inboundX(gc.posX))
-	    state = tryState;
+	    return tryState;
 
 	else if(gc.posX > START_OPTIONS_X &&
 	   80 <= gc.posY && gc.posY <= 115) 
-	    state = optionState;
+	    return optionState;
 
 	else if(gc.posX > END_X)
-	    state = startState;
+	    return startState;
 
-	if(state) gc.transition(state);
+	//if(state) return state;
     },
 }
 
@@ -655,12 +662,11 @@ let tryState = {
     },
 
     handle: function(gc) {
-
 	let gfx = gc.gfx;
 
 	let t = gc.curve.map(gc.posX),
-	    // y = gc.curve.compute(t).y,
-	    y = bez6(t, gc.curve.controls.ys), // FIXME TODO profile memory
+	    y = gc.curve.compute(t).y,
+	    //y = bez6(t, gc.curve.controls.ys), // FIXME TODO profile memory
 	    valid = Math.abs(gc.posY - y) < ACCURACY;
 
 	gc.render.curve = valid ? INCURVE : OUTCURVE;
@@ -668,8 +674,8 @@ let tryState = {
 	if(!valid) this.failed = true;
 
 	if(gc.posX >= gc.curve.endX) 
-	    gc.transition(this.failed ?
-			  simpleState : successState);
+	    return this.failed ?
+			  simpleState : successState;
     },
 
     teardown: function(gc) {
@@ -690,7 +696,7 @@ let successState = {
 	gc.render.success = true;
 	gc.successCount++;
 	gc.failCount = 0;
-	gc.transition(simpleState);
+	return simpleState;
     },
 
     teardown: function(gc) {
@@ -708,6 +714,7 @@ let optionState = {
 	gc.render.options = false;
 	this.options = {
 	    onCancel: false,
+	    onBack: false,
 	    onNext: false,
 	    onToggle: false,
 	};
@@ -723,16 +730,18 @@ let optionState = {
 
 	// only select an option if we haven't yet
 	if(!oSelected && gc.posX >= END_OPTIONS_X-40) {
-	    if(260 <= gc.posY && gc.posY <= 300) 
+	    if(80 <= gc.posY && gc.posY <= 115) 
 		m.onCancel = oSelected = true;
+	    else if(160 <= gc.posY && gc.posY <= 200)
+		m.onBack = oSelected = true;
 	    else if(210 <= gc.posY && gc.posY <= 250) 
 		m.onNext = oSelected = true;
-	    else if(160 <= gc.posY && gc.posY <= 200)
+	    else if(260 <= gc.posY && gc.posY <= 300) 
 		m.onToggle = oSelected = true;
 	}
 
 	if(gc.posX >= END_OPTIONS_X) {
-	    if(oSelected) gc.transition(startState );
+	    if(oSelected) return startState;
 	    else gc.posX = START_OPTIONS_X;
 	}
     },
@@ -742,9 +751,11 @@ let optionState = {
 	if(m.onToggle) gc.toggleSing();
 
 	if(m.onNext) {
-	    gc.curve = null; 
-	    gc.successCount = 0;
-	    gc.failCount = 0;
+	    gc.harderCurve();
+	}
+
+	if(m.onBack) {
+	    gc.easierCurve();
 	}
 
 	// TODO delete if not needed
@@ -770,9 +781,10 @@ $('document').ready(function() {
 
     let gameContext = {
 	state: null,
+	next: null, // pursuing memory leak, removing variables from loop
 	curve: null,
 	speed: INITIAL_SPEED,
-	difficulty: 1,
+	difficulty: 2,
 	successCount: 0,
 	failCount: 0,
 	posX: START_X,
@@ -786,16 +798,6 @@ $('document').ready(function() {
 	},
 	gfx: new Graphics($('canvas')[0]),
 	sing: false,
-	transition: function(s) {
-	    if(this.state && this.state.teardown) {
-		this.state.teardown(this);
-	    }
-	    if(s.setup) s.setup(this);
-	    this.state = s;
-	},
-	setCurve: function(c) {
-	    this.curve = c;
-	},
 	doRender: function() {
 	    this.gfx.slideMetronome(this.posX);
 	    this.gfx.clear();
@@ -817,11 +819,42 @@ $('document').ready(function() {
 		this.gfx.drawOptions();
 	    this.gfx.drawTarget({ x: this.posX-10, y: this.posY-10});
 	},
-	handlePitch: function(pitch) {
-	    this.posX = this.posX += this.speed;
+	transition: function() {
+	    if(this.state && this.state.teardown)
+		this.state.teardown(this);
+	    this.state = this.next;
+	    this.next = null;
+	    if(this.state.setup)
+		this.state.setup(this);
+	},
+	easierCurve: function() {
+	    if(this.difficulty > 2)
+		this.difficulty--;
+	    this.setCurve(randomCurve(this.difficulty));
+	},
+	harderCurve: function() {
+	    if(this.difficulty < 6)
+		this.difficulty++;
+	    this.setCurve(randomCurve(this.difficulty));
+	},
+	setCurve: function(c) {
+	    this.curve = randomCurve(this.difficulty);
+	    this.speed = INITIAL_SPEED;
+	    this.successCount = 0;
+	    this.failCount = 0;
+	},
+	handlePitch: function(pitch, timeDelta, renderOk) {
+	    this.posX = this.posX += this.speed * timeDelta;
 	    this.posY = pitchToPos(this, pitch);
-	    this.doRender();
-	    this.state.handle(this);
+
+	    // I could just move this render outside...
+	    if(renderOk) {
+		this.doRender();
+		// I think it's ok to throttle this a little too
+		this.next = this.state.handle(this);
+		if(this.next)
+		    this.transition();
+	    }
 	},
 	toggleSing: function() {
 	    this.sing = !this.sing;
@@ -829,9 +862,11 @@ $('document').ready(function() {
     }
 
 
-    gameContext.transition(startState);
+    // removing all variables to track down memory leak
+    gameContext.next = startState;
+    gameContext.transition();
 
-    handlePitch = p => gameContext.handlePitch(p);
+    handlePitch = (p,d,r) => gameContext.handlePitch(p,d,r);
 
     let mic = window.mic = new Microphone;
     mic.enable();
