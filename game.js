@@ -6,8 +6,10 @@
 
 // instead of whistling
 
+const DEBUG = true;
 const ZERO = { x: 0, y: 0, z: 0 };
 const MIN_SPEED = 0.1;
+const MIN_DIFFICULTY = 2;
 const INITIAL_SPEED = 0.1;
 const MAX_SPEED = 0.2;
 const START_X = 100;
@@ -292,7 +294,7 @@ class Graphics {
 		p0 = p1;
 	    });
 	    this.ctx.stroke();
-	    this.drawPoints(curve);
+	    if(DEBUG) this.drawPoints(curve);
 	    return;
 	}
 
@@ -316,7 +318,7 @@ class Graphics {
 	this.ctx.stroke();
 	this.ctx.closePath();
 	this.ctx.restore();
-	this.drawPoints(curve);
+	if(DEBUG) this.drawPoints(curve);
     }
 
     // TODO FIXME optimize using curve LUT
@@ -385,40 +387,35 @@ class Graphics {
     }
 
     drawPoints(curve) {
-	let ctx = this.ctx;
-	ctx.save();
-	curve.points.forEach(function(e){
-	    ctx.fillStyle = 'red';
-	    ctx.beginPath();
-	    ctx.arc(e.x,e.y,3,0,2*Math.PI)
-	    ctx.closePath();
-	    ctx.fill();
+	this.ctx.save();
+	curve.points.forEach( p => {
+	    this.ctx.fillStyle = 'red';
+	    this.ctx.beginPath();
+	    this.ctx.arc(p.x,p.y,3,0,2*Math.PI)
+	    this.ctx.closePath();
+	    this.ctx.fill();
 	    });
-	ctx.restore();
+	this.ctx.restore();
     }
 
     // boolean predicate expected
     drawOption(rgb, xy, predicate) {
-	let ctx = this.ctx;
 	let alpha = predicate ? '1.0' :
 	    rgb.length == 4 ? rgb[3] : '0.4';
-	ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]}, ${rgb[2]}, ${alpha})`;
-	ctx.beginPath();
-	ctx.ellipse(xy[0]-10, xy[1], 18, 10, 0, 2*Math.PI, false);
-	ctx.closePath();
-	ctx.fill();
+	this.ctx.fillStyle = `rgba(${rgb[0]},${rgb[1]}, ${rgb[2]}, ${alpha})`;
+	this.ctx.beginPath();
+	this.ctx.ellipse(xy[0]-10, xy[1], 18, 10, 0, 2*Math.PI, false);
+	this.ctx.closePath();
+	this.ctx.fill();
     }
 
     drawOptions(menu) {
-	let x1 = END_X,
-	    x2 = END_OPTIONS_X;
-	this.drawOption([255,165,0, 0.2], [x1, OPTIONS_Y], !!menu);
+	this.drawOption([255,165,0, 0.2], [END_X, OPTIONS_Y], !!menu);
 	if(menu) {
-	    let m = menu;
-	    this.drawOption([128,128,128], [x2, OPTIONS_Y], m.onCancel);
-	    this.drawOption([168,235, 65], [x2, 180], m.onBack);
-	    this.drawOption([255, 99, 71], [x2, 230], m.onNext);
-	    this.drawOption([216,191,216], [x2, 280], m.onToggle);
+	    this.drawOption([128,128,128], [END_OPTIONS_X, OPTIONS_Y], menu.onCancel);
+	    this.drawOption([168,235, 65], [END_OPTIONS_X, 180], menu.onBack);
+	    this.drawOption([255, 99, 71], [END_OPTIONS_X, 230], menu.onNext);
+	    this.drawOption([216,191,216], [END_OPTIONS_X, 280], menu.onToggle);
 	}
     }
 
@@ -587,8 +584,6 @@ class Bezier {
 let startState  = {
     
     setup: function(gc) {
-
-	
 	// need a curve, period!
 	if(!gc.curve) { // game starts with null
 	    console.warn('curve not set for this round'); // otherwise unexpected
@@ -602,11 +597,18 @@ let startState  = {
 	    gc.successCount = 0;
 	    // need something a little easier
 	    if(gc.failCount >= 3) {
-		gc.speed = Math.min(Math.max(gc.speed-0.1, MIN_SPEED), MAX_SPEED);
-		gc.failCount = 0;
+		// do nothing if slowest and easiest, we don't want to frustrate the player!
+		if(gc.speed <= MIN_SPEED && gc.difficulty > MIN_DIFFICULTY) {
+		    gc.render.override = FAILURE;
+		    setTimeout(() => gc.render.override = false, 750);
+		    gc.easierCurve();
+		} else gc.resetSlower();
 		console.log('BOOTED, speed=',gc.speed);
 	    }
 	}
+
+	// awkward logic, but:
+	// if success hasn't been cleared, it just happened
 
 	// need another challenge!
 	if(!!gc.successCount && gc.speed >= MAX_SPEED) {
@@ -629,14 +631,11 @@ let startState  = {
     handle: function(gc) {
 	return simpleState;
     }
-
 }
 
 let simpleState = {
     
     handle: function(gc) {
-	//let state;
-
 	if(gc.curve.inboundX(gc.posX))
 	    return tryState;
 
@@ -646,8 +645,6 @@ let simpleState = {
 
 	else if(gc.posX > END_X)
 	    return startState;
-
-	//if(state) return state;
     },
 }
 
@@ -667,7 +664,7 @@ let tryState = {
 	let t = gc.curve.map(gc.posX),
 	    y = gc.curve.compute(t).y,
 	    //y = bez6(t, gc.curve.controls.ys), // FIXME TODO profile memory
-	    valid = Math.abs(gc.posY - y) < ACCURACY;
+	    valid = gc.cheat || Math.abs(gc.posY - y) < ACCURACY;
 
 	gc.render.curve = valid ? INCURVE : OUTCURVE;
 
@@ -693,7 +690,7 @@ let successState = {
     },
 
     handle: function(gc) {
-	gc.render.success = true;
+	gc.render.override = SUCCESS;
 	gc.successCount++;
 	gc.failCount = 0;
 	return simpleState;
@@ -702,7 +699,7 @@ let successState = {
     teardown: function(gc) {
 	// only in success for one frame
 	setTimeout(function() {
-	    gc.render.success = false;
+	    gc.render.override = false;
 	}, 500);
     },
 }
@@ -774,7 +771,7 @@ const curveStyles = {
     def: [{outline: 'blue', accent: 'yellow', segment: 'blue'},
 	  {outline: 'yellow', accent: 'blue', segment: 'yellow'},
 	  {outline: 'yellow', accent: 'green', segment: 'white'},
-	  {outline: 'blue', accent: 'yellow', segment: 'blue'}]
+	  {outline: 'black', accent: 'red', segment: 'black'}]
 };
 
 $('document').ready(function() {
@@ -787,6 +784,9 @@ $('document').ready(function() {
 	difficulty: 2,
 	successCount: 0,
 	failCount: 0,
+
+	cheat: false, // debug without noise
+
 	posX: START_X,
 	posY: 0,
 	render: {
@@ -802,7 +802,7 @@ $('document').ready(function() {
 	    this.gfx.slideMetronome(this.posX);
 	    this.gfx.clear();
 	    if(this.curve) {
-		let type = this.render.success ? SUCCESS : this.render.curve,
+		let type = this.render.override || this.render.curve,
 		    cs = curveStyles.def[type];
 		    opts = { strokeStyle: cs.outline, lineWidth: 7 };
 		    hopts = { strokeStyle: cs.accent, lineWidth: opts.lineWidth-1};
@@ -837,6 +837,11 @@ $('document').ready(function() {
 		this.difficulty++;
 	    this.setCurve(randomCurve(this.difficulty));
 	},
+	resetSlower: function() {
+	    this.successCount = 0;
+	    this.failCount = 0;
+	    this.speed = Math.min(Math.max(this.speed-0.1, MIN_SPEED), MAX_SPEED);
+	},
 	setCurve: function(c) {
 	    this.curve = randomCurve(this.difficulty);
 	    this.speed = INITIAL_SPEED;
@@ -861,6 +866,34 @@ $('document').ready(function() {
 	},
     }
 
+
+    if(DEBUG) {
+	var optionHold = false,
+	    mouseControl = false,
+	    mouseFunc = e => { mouseY = e.clientY; console.log(mouseY); },
+	    mouseY = 0;
+	document.addEventListener('keydown', e => {
+	    if(e.key == 'm') {
+		if(!mouseControl) {
+		    mouseControl = true;
+		    document.addEventListener('mousemove', mouseFunc);
+		} else {
+		    mouseControl = false;
+		    document.removeEventListener('mousemove', mouseFunc);
+		}
+	    }
+	});
+	document.addEventListener('keydown', e => {
+	    if(e.key == 'c') gameContext.cheat = true;
+	    else if(e.key == 'o') optionHold = true;
+	    else if(e.key == 'i')
+		pitchToPos = p => optionHold ? OPTIONS_Y : mouseControl ? mouseY : 0;
+	});
+	document.addEventListener('keyup', e => {
+	    if(e.key == 'o') optionHold = false;
+	    if(e.key == 'c') gameContext.cheat = false;
+	});
+    }
 
     // removing all variables to track down memory leak
     gameContext.next = startState;
