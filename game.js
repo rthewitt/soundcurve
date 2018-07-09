@@ -3,10 +3,18 @@
 // NOTE: Consider Paper.js for mimic/score modeling (Path simplification)
 
 // TODO Encapsulate constants
+// FIXME panic mode is not behaving as I would expect
+// I think it's updating the game with the same values
+// or else the states are cycling.
+// WE DO NOT WANT DUPLICATE BEHAVIOR, that's worse that slowdown
 
-// instead of whistling
+// TODO
+// 1. visually indicate:
+// current difficulty level
+// current speed
+// 2. fix lopsided target area - accuracy isn't the same above/below
 
-const DEBUG = true;
+var DEBUG = false;
 const ZERO = { x: 0, y: 0, z: 0 };
 const MIN_SPEED = 0.1;
 const MIN_DIFFICULTY = 2;
@@ -260,21 +268,37 @@ class Graphics {
 	this.metronome.css('left', x);
     }
 
-    drawTarget(pos) {
-	this.ctx.drawImage(this.images.reticle, pos.x, pos.y, 20, 20);
-    }
-
-    /*
-    drawCurve(curve, opts) {
-	this.ctx.save();
-	for(var o in opts) {
-	    this.ctx[o] = opts[o];
+    drawTarget(pos, curve) {
+	this.ctx.drawImage(this.images.reticle, pos.x-10, pos.y-10, 20, 20);
+	if(curve.startX-10 < pos.x && pos.x < curve.endX+10 ||
+	   pos.x > END_X) { // let them zap the options
+	    this.ctx.save();
+	    this.ctx.lineWidth = '4';
+	    this.ctx.strokeStyle = 'orange';
+	    this.ctx.beginPath();
+	    this.ctx.moveTo(pos.x*0.5, this.canvas.height-9);
+	    this.ctx.lineTo(pos.x, pos.y);
+	    this.ctx.stroke();
+	    this.ctx.closePath();
+	    this.ctx.beginPath();
+	    this.ctx.fillStyle = 'orange';
+	    this.ctx.arc(pos.x, pos.y, 5, 0, 2*Math.PI);
+	    this.ctx.fill();
+	    this.ctx.closePath();
+	    this.ctx.beginPath();
+	    this.ctx.fillStyle = 'blue';
+	    this.ctx.arc(pos.x*0.5, this.canvas.height-9, 9, 0, 2*Math.PI);
+	    this.ctx.fill();
+	    this.ctx.restore();
+	} else {
+	    this.ctx.save();
+	    this.ctx.beginPath();
+	    this.ctx.fillStyle = 'blue';
+	    this.ctx.arc(pos.x*0.5, this.canvas.height-9, 9, 0, 2*Math.PI);
+	    this.ctx.fill();
+	    this.ctx.restore();
 	}
-	this.drawMatrix(curve);
-	this.ctx.restore();
-	this.drawPoints(curve);
     }
-    */
 
     drawCurve(curve, opts, offset) {
 	offset = offset || { x:0, y:0 };
@@ -387,6 +411,7 @@ class Graphics {
     }
 
     drawPoints(curve) {
+	return;
 	this.ctx.save();
 	curve.points.forEach( p => {
 	    this.ctx.fillStyle = 'red';
@@ -412,9 +437,9 @@ class Graphics {
     drawOptions(menu) {
 	this.drawOption([255,165,0, 0.2], [END_X, OPTIONS_Y], !!menu);
 	if(menu) {
-	    this.drawOption([128,128,128], [END_OPTIONS_X, OPTIONS_Y], menu.onCancel);
-	    this.drawOption([168,235, 65], [END_OPTIONS_X, 180], menu.onBack);
-	    this.drawOption([255, 99, 71], [END_OPTIONS_X, 230], menu.onNext);
+	    this.drawOption([255,165,  0], [END_OPTIONS_X, OPTIONS_Y], menu.onCancel);
+	    this.drawOption([168,235, 65], [END_OPTIONS_X, 180], menu.onNext);
+	    this.drawOption([255, 99, 71], [END_OPTIONS_X, 230], menu.onBack);
 	    this.drawOption([216,191,216], [END_OPTIONS_X, 280], menu.onToggle);
 	}
     }
@@ -455,16 +480,6 @@ class Bezier {
     get width() {
 	return this.endX - this.startX;
     }
-
-    // FIXME make generic
-    /*
-    compute(t) {
-	return {
-	    x: bez6(t, this.controls.xs),
-	    y: bez6(t, this.controls.ys)
-	       };
-    }
-    */
 
     compute(t) {
       // shortcuts
@@ -654,7 +669,7 @@ let tryState = {
     setup: function(gc) {
 	this.failed = false;
 	this.prevStyle = gc.render.curve;
-	gc.render.curve = INCURVE;
+	gc.render.curve = OUTCURVE;
 	gc.render.segment = true;
     },
 
@@ -663,7 +678,6 @@ let tryState = {
 
 	let t = gc.curve.map(gc.posX),
 	    y = gc.curve.compute(t).y,
-	    //y = bez6(t, gc.curve.controls.ys), // FIXME TODO profile memory
 	    valid = gc.cheat || Math.abs(gc.posY - y) < ACCURACY;
 
 	gc.render.curve = valid ? INCURVE : OUTCURVE;
@@ -721,7 +735,7 @@ let optionState = {
 	let m = this.options;
 
 	gc.gfx.drawOptionsMenu(this.options);
-	gc.gfx.drawTarget({ x: gc.posX-10, y: gc.posY-10});
+	gc.gfx.drawTarget({ x: gc.posX, y: gc.posY}, gc.curve);
 
 	let oSelected = Object.values(this.options).some(v=>v);
 
@@ -729,10 +743,10 @@ let optionState = {
 	if(!oSelected && gc.posX >= END_OPTIONS_X-40) {
 	    if(80 <= gc.posY && gc.posY <= 115) 
 		m.onCancel = oSelected = true;
-	    else if(160 <= gc.posY && gc.posY <= 200)
-		m.onBack = oSelected = true;
-	    else if(210 <= gc.posY && gc.posY <= 250) 
+	    else if(160 <= gc.posY && gc.posY <= 200) 
 		m.onNext = oSelected = true;
+	    else if(210 <= gc.posY && gc.posY <= 250)
+		m.onBack = oSelected = true;
 	    else if(260 <= gc.posY && gc.posY <= 300) 
 		m.onToggle = oSelected = true;
 	}
@@ -769,8 +783,8 @@ const OUTCURVE = 0,
 const curveStyles = {
     names: ['OUTCURVE, INCURVE', 'SUCCESS', 'FAILURE'],
     def: [{outline: 'blue', accent: 'yellow', segment: 'blue'},
-	  {outline: 'yellow', accent: 'blue', segment: 'yellow'},
-	  {outline: 'yellow', accent: 'green', segment: 'white'},
+	  {outline: 'blue', accent: 'blue', segment: 'yellow'},
+	  {outline: 'green', accent: 'green', segment: 'white'},
 	  {outline: 'black', accent: 'red', segment: 'black'}]
 };
 
@@ -804,20 +818,20 @@ $('document').ready(function() {
 	    if(this.curve) {
 		let type = this.render.override || this.render.curve,
 		    cs = curveStyles.def[type];
-		    opts = { strokeStyle: cs.outline, lineWidth: 7 };
-		    hopts = { strokeStyle: cs.accent, lineWidth: opts.lineWidth-1};
+		    opts = { strokeStyle: cs.outline, lineWidth: ACCURACY };
+		    hopts = { strokeStyle: cs.accent, lineWidth: opts.lineWidth-3};
 
 		this.gfx.drawCurve(this.curve, opts);
 		this.gfx.drawCurve(this.curve, hopts);
 		if(this.render.segment) {
 		    let t = this.curve.map(this.posX),
-			sopts = { strokeStyle: cs.outline, lineWidth: 5 };
+			sopts = { strokeStyle: cs.segment, lineWidth: opts.lineWidth-5 };
 		    this.gfx.drawSegmentDelta(this.curve, t, 0.02, sopts);
 		}
 	    }
 	    if(this.render.options)
 		this.gfx.drawOptions();
-	    this.gfx.drawTarget({ x: this.posX-10, y: this.posY-10});
+	    this.gfx.drawTarget({ x: this.posX, y: this.posY}, this.curve);
 	},
 	transition: function() {
 	    if(this.state && this.state.teardown)
@@ -833,9 +847,10 @@ $('document').ready(function() {
 	    this.setCurve(randomCurve(this.difficulty));
 	},
 	harderCurve: function() {
-	    if(this.difficulty < 6)
+	    if(this.difficulty < 6) {
 		this.difficulty++;
-	    this.setCurve(randomCurve(this.difficulty));
+		this.setCurve(randomCurve(this.difficulty));
+	    } else alert('you won!'); // TODO disallow option for harder curve at d=6
 	},
 	resetSlower: function() {
 	    this.successCount = 0;
@@ -867,14 +882,24 @@ $('document').ready(function() {
     }
 
 
-    if(DEBUG) {
+    function debugMode() {
+	DEBUG = true;
 	var optionHold = false,
+	    ignoreSet = false,
 	    mouseControl = false,
 	    mouseFunc = e => { mouseY = e.clientY; console.log(mouseY); },
 	    mouseY = 0;
+
+	function debugIgnorePitch() {
+	    if(ignoreSet) return;
+	    pitchToPos = p => optionHold ? OPTIONS_Y : mouseControl ? mouseY : 0,
+	    ignoreSet = true;
+	}
+
 	document.addEventListener('keydown', e => {
 	    if(e.key == 'm') {
 		if(!mouseControl) {
+		    debugIgnorePitch();
 		    mouseControl = true;
 		    document.addEventListener('mousemove', mouseFunc);
 		} else {
@@ -886,14 +911,22 @@ $('document').ready(function() {
 	document.addEventListener('keydown', e => {
 	    if(e.key == 'c') gameContext.cheat = true;
 	    else if(e.key == 'o') optionHold = true;
-	    else if(e.key == 'i')
-		pitchToPos = p => optionHold ? OPTIONS_Y : mouseControl ? mouseY : 0;
+	    else if(e.key == 'i') debugIgnorePitch();
 	});
 	document.addEventListener('keyup', e => {
 	    if(e.key == 'o') optionHold = false;
 	    if(e.key == 'c') gameContext.cheat = false;
 	});
     }
+    debugListener = e => {
+	if(e.key == 'd') {
+	    console.log('calling debug mode');
+	    debugMode();
+	    document.removeEventListener('keydown', debugListener);
+	}
+    };
+    if(DEBUG) debugMode();
+    else document.addEventListener('keydown', debugListener);
 
     // removing all variables to track down memory leak
     gameContext.next = startState;
