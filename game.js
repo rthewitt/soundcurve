@@ -202,6 +202,7 @@ function randomCurve(order) {
 	});
     }
     points = points.map(offset(360,160));
+    console.log(points);
     px = [];
     py = [];
     points.forEach(p => {
@@ -858,7 +859,7 @@ $('document').ready(function() {
 	    this.speed = Math.min(Math.max(this.speed-0.1, MIN_SPEED), MAX_SPEED);
 	},
 	setCurve: function(c) {
-	    this.curve = randomCurve(this.difficulty);
+	    this.curve = c;
 	    this.speed = INITIAL_SPEED;
 	    this.successCount = 0;
 	    this.failCount = 0;
