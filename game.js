@@ -3,6 +3,11 @@
 // NOTE: Consider Paper.js for mimic/score modeling (Path simplification)
 
 // TODO Encapsulate constants
+// FIXME false updates from microphone.js are called hundreds
+// of times while the user grants mic permisions. We need to
+// address this, it was difficult to detect during animation testing
+// and led to a very confusing start state.
+
 // FIXME panic mode is not behaving as I would expect
 // I think it's updating the game with the same values
 // or else the states are cycling.
